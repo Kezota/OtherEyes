@@ -183,29 +183,21 @@ struct AnimalFilterProcessor: Sendable {
         return controls.outputImage ?? blurred
     }
 
-    // MARK: - 🐟 Fish: Barrel fisheye + blue-green underwater tint (0.5× ultra-wide)
-    // "Stretch in" = barrel distortion: edges bow inward/toward center.
-    // Hardware 0.5× lens provides real wide FOV; negative bump adds the curve.
-    // Fill-zoom removes dark corner fringe from the warp.
+    // MARK: - 🐟 Fish: Pincushion fisheye + blue-green underwater tint (0.5× ultra-wide)
+    // "Stretch out" = pincushion distortion: center bulges outward.
+    // Hardware 0.5× lens provides real wide FOV; positive bump adds the bulge.
     private func applyFishFilter(_ image: CIImage) -> CIImage {
         let center = CGPoint(x: image.extent.midX, y: image.extent.midY)
         let radius = Float(min(image.extent.width, image.extent.height) * 0.90)
 
-        // ── Barrel / "stretch in" distortion ─────────────────────────────────
-        // Negative scale = edges pulled inward = classic fisheye barrel curve
+        // ── Pincushion / "stretch out" distortion ────────────────────────────
+        // Positive scale = center pushed outward = bulging fisheye effect
         guard let bump = CIFilter(name: "CIBumpDistortion") else { return image }
         bump.setValue(image,  forKey: kCIInputImageKey)
         bump.setValue(CIVector(cgPoint: center), forKey: kCIInputCenterKey)
         bump.setValue(NSNumber(value: radius),   forKey: kCIInputRadiusKey)
-        bump.setValue(NSNumber(value: -0.55),    forKey: kCIInputScaleKey)
-        let bumped = bump.outputImage ?? image
-
-        // Fill-zoom to push dark fringe off-frame
-        let fillScale: CGFloat = 1.25
-        let zoomIn = CGAffineTransform(translationX: center.x, y: center.y)
-            .scaledBy(x: fillScale, y: fillScale)
-            .translatedBy(x: -center.x, y: -center.y)
-        let filled = bumped.transformed(by: zoomIn).cropped(to: image.extent)
+        bump.setValue(NSNumber(value: 0.55),     forKey: kCIInputScaleKey)
+        let filled = (bump.outputImage ?? image).cropped(to: image.extent)
 
         // ── Blue-green underwater colour shift ────────────────────────────────
         let matrix = CIFilter.colorMatrix()
