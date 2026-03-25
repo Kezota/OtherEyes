@@ -8,7 +8,7 @@ import CoreImage.CIFilterBuiltins
 
 struct AnimalFilterProcessor: Sendable {
 
-    nonisolated(unsafe) private let context = CIContext()
+    private let context = CIContext()
 
     func apply(animal: Animal, to image: CIImage) -> CIImage {
         switch animal {
@@ -16,12 +16,15 @@ struct AnimalFilterProcessor: Sendable {
         case .cat:          return applyCatFilter(image)
         case .fly:          return applyFlyFilter(image)
         case .bird:         return applyBirdFilter(image)
-        case .snake:        return applySnakeFilter(image)
+        case .cockroach:    return applyCockroachFilter(image)
+        case .fish:         return applyFishFilter(image)
+        case .rat:          return applyRatFilter(image)
         case .mantisShrimp: return applyMantisFilter(image)
         }
     }
 
     // MARK: - 🐶 Dog: Dichromatic (blue–yellow, no red)
+    // Simulates ~f/2.8 | ISO 800 | fast shutter for motion tracking
     private func applyDogFilter(_ image: CIImage) -> CIImage {
         // Color matrix: simulate dichromacy
         // Dogs have S-cones (blue) and L-cones (yellow-green), no true red.
@@ -37,115 +40,225 @@ struct AnimalFilterProcessor: Sendable {
         matrix.biasVector   = CIVector(x: 0,    y: 0,    z: 0,    w: 0)
         let matrixOut = matrix.outputImage ?? image
 
-        // Lower overall saturation
+        // Lower overall saturation; slight brightness boost (wide pupil in scotopic)
         let controls = CIFilter.colorControls()
         controls.inputImage = matrixOut
-        controls.saturation = 0.6
-        controls.brightness = 0.0
-        controls.contrast   = 1.0
+        controls.saturation = 0.62
+        controls.brightness = 0.04
+        controls.contrast   = 1.05
         return controls.outputImage ?? matrixOut
     }
 
-    // MARK: - 🐱 Cat: Night-adapted (high exposure, desaturated, slight blur)
+    // MARK: - 🐱 Cat: Night-adapted (high exposure, desaturated, tapetum glow, mild blur)
+    // Simulates ~f/1.8 | ISO 6400 | wide pupil, low spatial acuity
     private func applyCatFilter(_ image: CIImage) -> CIImage {
-        // Boost exposure (tap into the shadows)
+        // High ISO simulation: boost exposure strongly — mimics wide pupil gathering light
         guard let exposureFilter = CIFilter(name: "CIExposureAdjust") else { return image }
         exposureFilter.setValue(image, forKey: kCIInputImageKey)
-        exposureFilter.setValue(NSNumber(value: 1.0), forKey: kCIInputEVKey)
+        exposureFilter.setValue(NSNumber(value: 1.4), forKey: kCIInputEVKey)      // +1.4 EV
         let exposed = exposureFilter.outputImage ?? image
 
-        // Reduce saturation
+        // Highlight clipping — mimic sensor saturation at high ISO
         let controls = CIFilter.colorControls()
         controls.inputImage = exposed
-        controls.saturation = 0.3
+        controls.saturation = 0.22       // nearly monochromatic in dim light
         controls.brightness = 0.0
-        controls.contrast   = 1.15
+        controls.contrast   = 1.25       // higher contrast = edge pop even in low light
         let desaturated = controls.outputImage ?? exposed
 
-        // Slight blur (cats have lower spatial acuity in daylight)
+        // Tapetum lucidum: slight green-cyan cast
+        let tint = CIFilter.colorMatrix()
+        tint.inputImage  = desaturated
+        tint.rVector     = CIVector(x: 0.85, y: 0.0,  z: 0.0, w: 0)
+        tint.gVector     = CIVector(x: 0.0,  y: 1.05, z: 0.0, w: 0)
+        tint.bVector     = CIVector(x: 0.0,  y: 0.0, z: 0.90, w: 0)
+        tint.aVector     = CIVector(x: 0,    y: 0,   z: 0,   w: 1)
+        tint.biasVector  = CIVector(x: 0,    y: 0,   z: 0,   w: 0)
+        let tinted = tint.outputImage ?? desaturated
+
+        // Soft blur — cats have ~20/150 visual acuity vs humans ~20/20
         let blur = CIFilter.gaussianBlur()
-        blur.inputImage = desaturated
-        blur.radius     = 1.4
-        return blur.outputImage?.cropped(to: image.extent) ?? desaturated
+        blur.inputImage = tinted
+        blur.radius     = 2.0
+        return blur.outputImage?.cropped(to: image.extent) ?? tinted
     }
 
-    // MARK: - 🪰 Fly: Compound eye mosaic
+    // MARK: - 🪰 Fly: Compound eye mosaic (slow-motion feel, pixelated, UV-tinted)
+    // Frame rate is throttled in CameraManager to 5 fps for slow-mo effect
     private func applyFlyFilter(_ image: CIImage) -> CIImage {
-        // Pixellate to simulate thousands of tiny hexagonal lenses
+        // Moderate pixellate — visible facets without being overwhelming
         let pixellate = CIFilter.pixellate()
         pixellate.inputImage = image
-        pixellate.scale      = 20
+        pixellate.scale      = 14        // was 28 — toned down, still reads as compound eye
         pixellate.center     = CGPoint(x: image.extent.midX, y: image.extent.midY)
         let mosaic = pixellate.outputImage ?? image
 
-        // Slightly saturate for the insect-UV-enhanced feel
+        // Slight edge blur — compound eyes have poor peripheral focus
+        let edgeBlur = CIFilter.gaussianBlur()
+        edgeBlur.inputImage = mosaic
+        edgeBlur.radius     = 1.5
+        let softened = edgeBlur.outputImage?.cropped(to: image.extent) ?? mosaic
+
+        // UV-shifted colors — flies see into UV spectrum
         let controls = CIFilter.colorControls()
-        controls.inputImage = mosaic
-        controls.saturation = 1.1
-        controls.brightness = 0.03
-        controls.contrast   = 1.05
-        return controls.outputImage ?? mosaic
+        controls.inputImage = softened
+        controls.saturation = 1.3
+        controls.brightness = 0.06
+        controls.contrast   = 1.1
+        return controls.outputImage ?? softened
     }
 
-    // MARK: - 🦅 Bird: Wide-angle FOV + sharp + high contrast
+    // MARK: - 🐦 Bird: Wide-angle + ultra-sharp tetrachromatic vision
+    // Hardware 0.5× ultra-wide lens already gives real FOV; bump adds subtle barrel warp.
+    // Scale up post-distortion to fill the frame and eliminate black corners.
     private func applyBirdFilter(_ image: CIImage) -> CIImage {
-        let center  = CGPoint(x: image.extent.midX, y: image.extent.midY)
-        let radius  = Float(min(image.extent.width, image.extent.height) * 0.75)
+        let center = CGPoint(x: image.extent.midX, y: image.extent.midY)
+        // Use full shorter-dimension radius so distortion covers the whole frame
+        let radius = Float(min(image.extent.width, image.extent.height) * 0.85)
 
-        // Barrel distortion to mimic wide FOV
-        if let bump = CIFilter(name: "CIBumpDistortion") {
-            bump.setValue(image,  forKey: kCIInputImageKey)
-            bump.setValue(CIVector(cgPoint: center), forKey: kCIInputCenterKey)
-            bump.setValue(NSNumber(value: radius),   forKey: kCIInputRadiusKey)
-            bump.setValue(NSNumber(value: -0.35),    forKey: kCIInputScaleKey)
-            let distorted = (bump.outputImage ?? image).cropped(to: image.extent)
+        // Moderate barrel warp — hardware lens already delivers the wide FOV
+        guard let bump = CIFilter(name: "CIBumpDistortion") else { return image }
+        bump.setValue(image,  forKey: kCIInputImageKey)
+        bump.setValue(CIVector(cgPoint: center), forKey: kCIInputCenterKey)
+        bump.setValue(NSNumber(value: radius),   forKey: kCIInputRadiusKey)
+        bump.setValue(NSNumber(value: -0.40),    forKey: kCIInputScaleKey)
+        let bumped = bump.outputImage ?? image
 
-            // Sharpen luminance
-            if let sharpen = CIFilter(name: "CISharpenLuminance") {
-                sharpen.setValue(distorted, forKey: kCIInputImageKey)
-                sharpen.setValue(NSNumber(value: 0.9), forKey: kCIInputSharpnessKey)
-                let sharpened = sharpen.outputImage ?? distorted
+        // ── Scale up to fill corners ─────────────────────────────────────────
+        // A bump with scale −S means corners need ~(1 + S*0.85) zoom to fill.
+        let fillScale: CGFloat = 1.30
+        let zoomIn = CGAffineTransform(translationX: center.x, y: center.y)
+            .scaledBy(x: fillScale, y: fillScale)
+            .translatedBy(x: -center.x, y: -center.y)
+        let filled = bumped.transformed(by: zoomIn).cropped(to: image.extent)
 
-                // High contrast + saturation (tetrachromacy colour richness)
-                let controls = CIFilter.colorControls()
-                controls.inputImage = sharpened
-                controls.saturation = 1.8
-                controls.contrast   = 1.3
-                controls.brightness = 0.0
-                return controls.outputImage?.cropped(to: image.extent) ?? sharpened
-            }
-            return distorted
+        // High sharpness — eagles have 5× more photoreceptors per mm² than humans
+        guard let sharpen = CIFilter(name: "CISharpenLuminance") else { return filled }
+        sharpen.setValue(filled, forKey: kCIInputImageKey)
+        sharpen.setValue(NSNumber(value: 1.4), forKey: kCIInputSharpnessKey)
+        let sharpened = sharpen.outputImage ?? filled
+
+        // Unsharp mask for extra fovea crispness
+        guard let unsharp = CIFilter(name: "CIUnsharpMask") else {
+            let c = CIFilter.colorControls()
+            c.inputImage = sharpened; c.saturation = 2.0; c.contrast = 1.4; c.brightness = 0
+            return c.outputImage?.cropped(to: image.extent) ?? sharpened
         }
-        return image
+        unsharp.setValue(sharpened, forKey: kCIInputImageKey)
+        unsharp.setValue(NSNumber(value: 1.5), forKey: kCIInputRadiusKey)
+        unsharp.setValue(NSNumber(value: 0.7), forKey: kCIInputIntensityKey)
+        let crispened = unsharp.outputImage ?? sharpened
+
+        // Tetrachromacy: vivid UV-boosted colours
+        let controls = CIFilter.colorControls()
+        controls.inputImage = crispened
+        controls.saturation = 2.2
+        controls.contrast   = 1.45
+        controls.brightness = 0.02
+        return controls.outputImage?.cropped(to: image.extent) ?? crispened
     }
 
-    // MARK: - 🐍 Snake: Thermal heatmap (bright = hot/red, dark = cool/blue)
-    private func applySnakeFilter(_ image: CIImage) -> CIImage {
-        // Step 1: Extract luminance (greyscale)
-        let grey = CIFilter.colorControls()
-        grey.inputImage = image
-        grey.saturation = 0
-        grey.contrast   = 1.2
-        let greyscale = grey.outputImage ?? image
+    // MARK: - 🪳 Cockroach: Low-resolution, blurry, dim, motion-sensitive
+    // Simulates poor visual acuity — relies mostly on light/dark detection
+    private func applyCockroachFilter(_ image: CIImage) -> CIImage {
+        // Step 1: Pixelate to simulate extremely low-resolution vision
+        let pixellate = CIFilter.pixellate()
+        pixellate.inputImage = image
+        pixellate.scale      = 18        // lower-res look
+        pixellate.center     = CGPoint(x: image.extent.midX, y: image.extent.midY)
+        let pixelated = pixellate.outputImage ?? image
 
-        // Step 2: Map luminance to thermal palette
-        // Bright pixels → warm (red/orange)  |  Dark pixels → cool (blue/purple)
+        // Step 2: Strong Gaussian blur on top of pixelation — blurry and unclear
+        let blur = CIFilter.gaussianBlur()
+        blur.inputImage = pixelated
+        blur.radius     = 8.0            // heavy blur
+        let blurred = blur.outputImage?.cropped(to: image.extent) ?? pixelated
+
+        // Step 3: Desaturate + dim (cockroaches are not colour-aware)
+        let controls = CIFilter.colorControls()
+        controls.inputImage = blurred
+        controls.saturation = 0.15       // nearly greyscale
+        controls.brightness = -0.12      // dim environment
+        controls.contrast   = 0.85       // soft, low-contrast
+        return controls.outputImage ?? blurred
+    }
+
+    // MARK: - 🐟 Fish: Barrel fisheye + blue-green underwater tint (0.5× ultra-wide)
+    // "Stretch in" = barrel distortion: edges bow inward/toward center.
+    // Hardware 0.5× lens provides real wide FOV; negative bump adds the curve.
+    // Fill-zoom removes dark corner fringe from the warp.
+    private func applyFishFilter(_ image: CIImage) -> CIImage {
+        let center = CGPoint(x: image.extent.midX, y: image.extent.midY)
+        let radius = Float(min(image.extent.width, image.extent.height) * 0.90)
+
+        // ── Barrel / "stretch in" distortion ─────────────────────────────────
+        // Negative scale = edges pulled inward = classic fisheye barrel curve
+        guard let bump = CIFilter(name: "CIBumpDistortion") else { return image }
+        bump.setValue(image,  forKey: kCIInputImageKey)
+        bump.setValue(CIVector(cgPoint: center), forKey: kCIInputCenterKey)
+        bump.setValue(NSNumber(value: radius),   forKey: kCIInputRadiusKey)
+        bump.setValue(NSNumber(value: -0.55),    forKey: kCIInputScaleKey)
+        let bumped = bump.outputImage ?? image
+
+        // Fill-zoom to push dark fringe off-frame
+        let fillScale: CGFloat = 1.25
+        let zoomIn = CGAffineTransform(translationX: center.x, y: center.y)
+            .scaledBy(x: fillScale, y: fillScale)
+            .translatedBy(x: -center.x, y: -center.y)
+        let filled = bumped.transformed(by: zoomIn).cropped(to: image.extent)
+
+        // ── Blue-green underwater colour shift ────────────────────────────────
         let matrix = CIFilter.colorMatrix()
-        matrix.inputImage   = greyscale
-        matrix.rVector      = CIVector(x: 2.2,  y: 0.0, z: 0.0, w: 0)
-        matrix.gVector      = CIVector(x: 0.0,  y: 0.8, z: 0.0, w: 0)
-        matrix.bVector      = CIVector(x: 0.0,  y: 0.0, z: 0.25, w: 0)
-        matrix.aVector      = CIVector(x: 0,    y: 0,   z: 0,   w: 1)
-        matrix.biasVector   = CIVector(x: 0.0,  y: 0.0, z: 0.4, w: 0)
-        let thermal = matrix.outputImage ?? greyscale
+        matrix.inputImage  = filled
+        matrix.rVector     = CIVector(x: 0.52, y: 0.0,  z: 0.0, w: 0)
+        matrix.gVector     = CIVector(x: 0.0,  y: 1.05, z: 0.0, w: 0)
+        matrix.bVector     = CIVector(x: 0.0,  y: 0.0,  z: 1.25, w: 0)
+        matrix.aVector     = CIVector(x: 0,    y: 0,    z: 0,   w: 1)
+        matrix.biasVector  = CIVector(x: 0,    y: 0.03, z: 0.08, w: 0)
+        let tinted = matrix.outputImage ?? filled
 
-        // Step 3: Punch contrast for dramatic thermal look
-        let boost = CIFilter.colorControls()
-        boost.inputImage = thermal
-        boost.saturation = 1.6
-        boost.contrast   = 1.5
-        boost.brightness = 0.0
-        return boost.outputImage?.cropped(to: image.extent) ?? thermal
+        // ── Soft peripheral vignette ──────────────────────────────────────────
+        let vignette = CIFilter.vignette()
+        vignette.inputImage  = tinted
+        vignette.radius      = 1.6
+        vignette.intensity   = 0.7
+        let vignetted = vignette.outputImage?.cropped(to: image.extent) ?? tinted
+
+        // ── Underwater grade ──────────────────────────────────────────────────
+        let controls = CIFilter.colorControls()
+        controls.inputImage = vignetted
+        controls.saturation = 0.88
+        controls.brightness = -0.07
+        controls.contrast   = 1.0
+        return controls.outputImage?.cropped(to: image.extent) ?? vignetted
+    }
+
+    // MARK: - 🐀 Rat: Blurry, dim, soft green-tinted vision
+    // Simulates poor visual acuity with limited colour perception (blue/green)
+    private func applyRatFilter(_ image: CIImage) -> CIImage {
+        // Step 1: Mild blur — rats have low spatial resolution
+        let blur = CIFilter.gaussianBlur()
+        blur.inputImage = image
+        blur.radius     = 3.5
+        let blurred = blur.outputImage?.cropped(to: image.extent) ?? image
+
+        // Step 2: Reduce contrast & saturation (muted, washed-out world)
+        let controls = CIFilter.colorControls()
+        controls.inputImage = blurred
+        controls.saturation = 0.35        // limited colour
+        controls.brightness = -0.10       // dim
+        controls.contrast   = 0.88        // soft, low contrast
+        let muted = controls.outputImage ?? blurred
+
+        // Step 3: Subtle green tint overlay (blue-green colour bias)
+        let matrix = CIFilter.colorMatrix()
+        matrix.inputImage  = muted
+        matrix.rVector     = CIVector(x: 0.82, y: 0.0,  z: 0.0, w: 0)   // reduce red
+        matrix.gVector     = CIVector(x: 0.0,  y: 1.08, z: 0.0, w: 0)   // slight green lift
+        matrix.bVector     = CIVector(x: 0.0,  y: 0.0,  z: 1.0, w: 0)
+        matrix.aVector     = CIVector(x: 0,    y: 0,    z: 0,   w: 1)
+        matrix.biasVector  = CIVector(x: 0,    y: 0.03, z: 0.0, w: 0)   // greenish bias
+        return (matrix.outputImage ?? muted).cropped(to: image.extent)
     }
 
     // MARK: - 🦐 Mantis Shrimp: Hyper-saturation + hue shift + chromatic aberration

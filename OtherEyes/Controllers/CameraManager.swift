@@ -20,6 +20,17 @@ fileprivate final class AtomicAnimal: @unchecked Sendable {
     }
 }
 
+// MARK: - Camera lens preference per animal
+extension Animal {
+    /// Animals that benefit from the real 0.5× ultra-wide camera.
+    var prefersUltraWide: Bool {
+        switch self {
+        case .bird, .fish: return true
+        default:           return false
+        }
+    }
+}
+
 @MainActor
 class CameraManager: NSObject, ObservableObject {
     
@@ -37,12 +48,22 @@ class CameraManager: NSObject, ObservableObject {
     // Retained strongly so AVFoundation delegate is never deallocated
     nonisolated(unsafe) private var delegateWrapper: CameraDelegateWrapper?
 
+    // Track which lens is currently active so we only switch when needed
+    nonisolated(unsafe) private var currentLensIsUltraWide: Bool = false
+
     @Published var filteredImage: UIImage?
     @Published var rawImage: UIImage?
     @Published var isAuthorized: Bool = false
     
     @Published var selectedAnimal: Animal = .dog {
-        didSet { atomicAnimal.value = selectedAnimal }
+        didSet {
+            atomicAnimal.value = selectedAnimal
+            // Switch camera lens if the animal requires a different one
+            let needsUltraWide = selectedAnimal.prefersUltraWide
+            if needsUltraWide != currentLensIsUltraWide {
+                switchCameraLens(useUltraWide: needsUltraWide)
+            }
+        }
     }
     
     override init() {
@@ -54,12 +75,12 @@ class CameraManager: NSObject, ObservableObject {
         switch AVCaptureDevice.authorizationStatus(for: .video) {
         case .authorized:
             isAuthorized = true
-            setupSession()
+            setupSession(useUltraWide: false)
         case .notDetermined:
             AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
                 DispatchQueue.main.async {
                     self?.isAuthorized = granted
-                    if granted { self?.setupSession() }
+                    if granted { self?.setupSession(useUltraWide: false) }
                 }
             }
         default:
@@ -67,27 +88,28 @@ class CameraManager: NSObject, ObservableObject {
         }
     }
     
-    private func setupSession() {
+    // MARK: - Initial session setup
+    private func setupSession(useUltraWide: Bool) {
         sessionQueue.async { [weak self] in
             guard let self else { return }
             self.session.beginConfiguration()
             self.session.sessionPreset = .high
             
-            guard let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back),
+            let device = self.bestCamera(ultraWide: useUltraWide)
+            guard let device,
                   let input = try? AVCaptureDeviceInput(device: device),
                   self.session.canAddInput(input) else {
                 self.session.commitConfiguration()
                 return
             }
-            
             self.session.addInput(input)
-            
-            // Delegate is set to the nonisolated wrapper
+            self.currentLensIsUltraWide = useUltraWide && (device.deviceType == .builtInUltraWideCamera)
+
             let wrapper = CameraDelegateWrapper(manager: self,
                                                 filterProcessor: self.filterProcessor,
                                                 ciContext: self.ciContext,
                                                 atomicAnimal: self.atomicAnimal)
-            self.delegateWrapper = wrapper          // ← retain it!
+            self.delegateWrapper = wrapper
             self.videoOutput.setSampleBufferDelegate(wrapper, queue: self.processingQueue)
             self.videoOutput.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA]
             self.videoOutput.alwaysDiscardsLateVideoFrames = true
@@ -96,16 +118,48 @@ class CameraManager: NSObject, ObservableObject {
                 self.session.addOutput(self.videoOutput)
             }
             
-            if let connection = self.videoOutput.connection(with: .video) {
-                if connection.isVideoRotationAngleSupported(90) {
-                    connection.videoRotationAngle = 90
-                }
-            }
-            
+            self.configureRotation()
             self.session.commitConfiguration()
         }
     }
-    
+
+    // MARK: - Hot-swap between standard and ultra-wide lenses
+    private func switchCameraLens(useUltraWide: Bool) {
+        sessionQueue.async { [weak self] in
+            guard let self else { return }
+            let device = self.bestCamera(ultraWide: useUltraWide)
+            guard let device, let newInput = try? AVCaptureDeviceInput(device: device) else { return }
+
+            self.session.beginConfiguration()
+            // Remove existing inputs
+            for input in self.session.inputs { self.session.removeInput(input) }
+            if self.session.canAddInput(newInput) {
+                self.session.addInput(newInput)
+                self.currentLensIsUltraWide = useUltraWide && (device.deviceType == .builtInUltraWideCamera)
+            }
+            self.configureRotation()
+            self.session.commitConfiguration()
+        }
+    }
+
+    // MARK: - Helpers
+    /// Returns the best available camera. Falls back to wide-angle if ultra-wide isn't available.
+    private func bestCamera(ultraWide: Bool) -> AVCaptureDevice? {
+        if ultraWide,
+           let uw = AVCaptureDevice.default(.builtInUltraWideCamera, for: .video, position: .back) {
+            return uw
+        }
+        return AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back)
+    }
+
+    private func configureRotation() {
+        if let connection = self.videoOutput.connection(with: .video) {
+            if connection.isVideoRotationAngleSupported(90) {
+                connection.videoRotationAngle = 90
+            }
+        }
+    }
+
     func startSession() {
         sessionQueue.async { [weak self] in
             guard let self, !self.session.isRunning else { return }
@@ -149,10 +203,12 @@ final class CameraDelegateWrapper: NSObject, AVCaptureVideoDataOutputSampleBuffe
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
         let animal = atomicAnimal.value
         
-        // Simulating Fly slow-mo by dropping frames (strobe effect ~8 fps)
+        // Simulating Fly slow-mo by dropping frames (strobe effect ~5 fps)
+        // Flies perceive the world at ~250 fps — to a fly, WE look like slow-mo.
+        // We flip this: throttling camera frames simulates the fly "freezing" world.
         if animal == .fly {
             let now = CACurrentMediaTime()
-            if now - lastFlyFrameTime < 0.12 { return }
+            if now - lastFlyFrameTime < 0.20 { return }    // ~5 fps
             lastFlyFrameTime = now
         }
         

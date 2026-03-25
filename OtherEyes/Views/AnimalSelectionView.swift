@@ -19,8 +19,8 @@ struct AnimalSelectionView: View {
     @State private var path = NavigationPath()
 
     private let columns = [
-        GridItem(.flexible(), spacing: 16),
-        GridItem(.flexible(), spacing: 16)
+        GridItem(.flexible(), spacing: 10),
+        GridItem(.flexible(), spacing: 10)
     ]
 
     var body: some View {
@@ -54,7 +54,7 @@ struct AnimalSelectionView: View {
                 ScrollView(showsIndicators: false) {
                     VStack(spacing: 32) {
                         // Header
-                        VStack(spacing: 8) {
+                        VStack(spacing: 6) {
                             Text("OtherEyes")
                                 .font(.system(size: 38, weight: .bold, design: .rounded))
                                 .foregroundStyle(
@@ -73,7 +73,7 @@ struct AnimalSelectionView: View {
                                 .foregroundStyle(.secondary)
                                 .multilineTextAlignment(.center)
                         }
-                        .padding(.top, 20)
+                        .padding(.top, 8)
 
                         // Animal grid
                         VStack(spacing: 12) {
@@ -83,7 +83,7 @@ struct AnimalSelectionView: View {
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .padding(.horizontal, 4)
 
-                            LazyVGrid(columns: columns, spacing: 16) {
+                            LazyVGrid(columns: columns, spacing: 10) {
                                 ForEach(Animal.allCases) { animal in
                                     Button {
                                         path.append(animal)
@@ -94,7 +94,7 @@ struct AnimalSelectionView: View {
                                 }
                             }
                         }
-                        .padding(.bottom, 32)
+                        .padding(.bottom, 16)
                     }
                     .padding(.horizontal, 24)
                 }
