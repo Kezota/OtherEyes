@@ -216,7 +216,7 @@ struct VisionSimulationView: View {
 
             Spacer()
 
-            // Insight button — pulses to draw attention
+            // Insight button — prominent with label, glow & pulse
             Button(action: {
                 withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
                     showFunFactNudge = false
@@ -224,28 +224,60 @@ struct VisionSimulationView: View {
                 }
             }) {
                 ZStack {
-                    // Outer pulse ring
-                    Circle()
-                        .stroke(Color(red: 0.75, green: 0.55, blue: 1.0).opacity(insightPulse ? 0.0 : 0.55), lineWidth: 2)
-                        .scaleEffect(insightPulse ? 1.55 : 1.0)
+                    // Pulse ring 1 (slow)
+                    Capsule()
+                        .stroke(Color(red: 0.75, green: 0.55, blue: 1.0).opacity(insightPulse ? 0.0 : 0.5), lineWidth: 2)
+                        .scaleEffect(insightPulse ? 1.45 : 1.0)
                         .animation(
-                            .easeOut(duration: 1.4).repeatForever(autoreverses: false),
+                            .easeOut(duration: 1.6).repeatForever(autoreverses: false),
                             value: insightPulse
                         )
-                        .frame(width: 44, height: 44)
+                        .frame(width: 100, height: 40)
 
-                    Text("💡")
-                        .font(.system(size: 20))
-                        .frame(width: 44, height: 44)
-                        .background {
-                            Circle()
-                                .fill(.ultraThinMaterial)
-                                .overlay {
-                                    Circle()
-                                        .stroke(Color(red: 0.75, green: 0.55, blue: 1.0).opacity(0.6), lineWidth: 1.5)
-                                }
-                                .shadow(color: Color(red: 0.55, green: 0.30, blue: 1.0).opacity(0.5), radius: 10, x: 0, y: 0)
-                        }
+                    // Pulse ring 2 (staggered)
+                    Capsule()
+                        .stroke(Color(red: 0.85, green: 0.65, blue: 1.0).opacity(insightPulse ? 0.0 : 0.35), lineWidth: 1.5)
+                        .scaleEffect(insightPulse ? 1.7 : 1.0)
+                        .animation(
+                            .easeOut(duration: 2.0).repeatForever(autoreverses: false),
+                            value: insightPulse
+                        )
+                        .frame(width: 100, height: 40)
+
+                    // Button content
+                    HStack(spacing: 6) {
+                        Text("💡")
+                            .font(.system(size: 18))
+                        Text("Insight")
+                            .font(.system(size: 14, weight: .bold, design: .rounded))
+                            .foregroundStyle(.white)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 9)
+                    .background {
+                        Capsule()
+                            .fill(
+                                LinearGradient(
+                                    colors: [
+                                        Color(red: 0.50, green: 0.25, blue: 0.95),
+                                        Color(red: 0.70, green: 0.35, blue: 1.0)
+                                    ],
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                )
+                            )
+                            .overlay {
+                                Capsule()
+                                    .stroke(.white.opacity(0.35), lineWidth: 1)
+                            }
+                            .shadow(color: Color(red: 0.55, green: 0.30, blue: 1.0).opacity(0.7), radius: 16, x: 0, y: 2)
+                            .shadow(color: Color(red: 0.65, green: 0.40, blue: 1.0).opacity(0.4), radius: 6, x: 0, y: 0)
+                    }
+                    .scaleEffect(insightPulse ? 1.04 : 1.0)
+                    .animation(
+                        .easeInOut(duration: 1.2).repeatForever(autoreverses: true),
+                        value: insightPulse
+                    )
                 }
             }
             .onAppear {
