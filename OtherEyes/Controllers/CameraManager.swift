@@ -45,6 +45,10 @@ class CameraManager: NSObject, ObservableObject {
     nonisolated(unsafe) private let filterProcessor = AnimalFilterProcessor()
     nonisolated(unsafe) private let ciContext = CIContext(options: [.useSoftwareRenderer: false])
 
+    // ── Transition & Ambient engines ─────────────────────────────────────
+    nonisolated(unsafe) let transitionManager = VisionTransitionManager()
+    nonisolated(unsafe) let ambientEngine = AmbientEffectEngine()
+
     // Retained strongly so AVFoundation delegate is never deallocated
     nonisolated(unsafe) private var delegateWrapper: CameraDelegateWrapper?
 
@@ -57,7 +61,14 @@ class CameraManager: NSObject, ObservableObject {
     
     @Published var selectedAnimal: Animal = .dog {
         didSet {
+            let oldAnimal = oldValue
             atomicAnimal.value = selectedAnimal
+
+            // Start smooth crossfade transition
+            if oldAnimal != selectedAnimal {
+                transitionManager.beginTransition(from: oldAnimal, to: selectedAnimal)
+            }
+
             // Switch camera lens if the animal requires a different one
             let needsUltraWide = selectedAnimal.prefersUltraWide
             if needsUltraWide != currentLensIsUltraWide {
@@ -108,7 +119,9 @@ class CameraManager: NSObject, ObservableObject {
             let wrapper = CameraDelegateWrapper(manager: self,
                                                 filterProcessor: self.filterProcessor,
                                                 ciContext: self.ciContext,
-                                                atomicAnimal: self.atomicAnimal)
+                                                atomicAnimal: self.atomicAnimal,
+                                                transitionManager: self.transitionManager,
+                                                ambientEngine: self.ambientEngine)
             self.delegateWrapper = wrapper
             self.videoOutput.setSampleBufferDelegate(wrapper, queue: self.processingQueue)
             self.videoOutput.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA]
@@ -161,6 +174,7 @@ class CameraManager: NSObject, ObservableObject {
     }
 
     func startSession() {
+        ambientEngine.start()
         sessionQueue.async { [weak self] in
             guard let self, !self.session.isRunning else { return }
             self.session.startRunning()
@@ -168,6 +182,7 @@ class CameraManager: NSObject, ObservableObject {
     }
     
     func stopSession() {
+        ambientEngine.stop()
         sessionQueue.async { [weak self] in
             guard let self, self.session.isRunning else { return }
             self.session.stopRunning()
@@ -190,22 +205,29 @@ final class CameraDelegateWrapper: NSObject, AVCaptureVideoDataOutputSampleBuffe
     private let filterProcessor: AnimalFilterProcessor
     private let ciContext: CIContext
     private let atomicAnimal: AtomicAnimal
+    private let transitionManager: VisionTransitionManager
+    private let ambientEngine: AmbientEffectEngine
 
     private var lastFlyFrameTime: TimeInterval = 0
     
-    fileprivate init(manager: CameraManager, filterProcessor: AnimalFilterProcessor, ciContext: CIContext, atomicAnimal: AtomicAnimal) {
+    fileprivate init(manager: CameraManager,
+                     filterProcessor: AnimalFilterProcessor,
+                     ciContext: CIContext,
+                     atomicAnimal: AtomicAnimal,
+                     transitionManager: VisionTransitionManager,
+                     ambientEngine: AmbientEffectEngine) {
         self.manager = manager
         self.filterProcessor = filterProcessor
         self.ciContext = ciContext
         self.atomicAnimal = atomicAnimal
+        self.transitionManager = transitionManager
+        self.ambientEngine = ambientEngine
     }
     
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
         let animal = atomicAnimal.value
         
         // Simulating Fly slow-mo by dropping frames (strobe effect ~5 fps)
-        // Flies perceive the world at ~250 fps — to a fly, WE look like slow-mo.
-        // We flip this: throttling camera frames simulates the fly "freezing" world.
         if animal == .fly {
             let now = CACurrentMediaTime()
             if now - lastFlyFrameTime < 0.20 { return }    // ~5 fps
@@ -215,10 +237,43 @@ final class CameraDelegateWrapper: NSObject, AVCaptureVideoDataOutputSampleBuffe
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
         
         let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
+        let extent = ciImage.extent
         
-        let rawCG      = ciContext.createCGImage(ciImage, from: ciImage.extent)
-        let filteredCI = filterProcessor.apply(animal: animal, to: ciImage)
-        let filteredCG = ciContext.createCGImage(filteredCI, from: ciImage.extent)
+        // ── Raw image (always current frame) ─────────────────────────────
+        let rawCG = ciContext.createCGImage(ciImage, from: extent)
+
+        // ── Filtered image with transition + ambient + dynamic focus ─────
+        var filteredCI: CIImage
+
+        if transitionManager.isTransitioning, let prevAnimal = transitionManager.previousAnimal {
+            // Crossfade: blend previous and current animal filters
+            let progress = transitionManager.progress
+            let prevFiltered = filterProcessor.apply(animal: prevAnimal, to: ciImage)
+            let newFiltered  = filterProcessor.apply(animal: animal, to: ciImage)
+
+            // Linear interpolation via CIBlendWithAlphaMask with a constant‐color mask
+            let maskColor = CIImage(color: CIColor(red: CGFloat(progress),
+                                                    green: CGFloat(progress),
+                                                    blue: CGFloat(progress)))
+                .cropped(to: extent)
+
+            let blend = CIFilter.blendWithMask()
+            blend.inputImage = newFiltered
+            blend.backgroundImage = prevFiltered
+            blend.maskImage = maskColor
+            filteredCI = blend.outputImage?.cropped(to: extent) ?? newFiltered
+        } else {
+            filteredCI = filterProcessor.apply(animal: animal, to: ciImage)
+        }
+
+        // Apply per-animal ambient effects
+        let ambientParams = ambientEngine.currentParams
+        filteredCI = filterProcessor.applyAmbientEffect(animal: animal, to: filteredCI, params: ambientParams)
+
+        // Apply dynamic focus (centre sharp, edges softly blurred)
+        filteredCI = filterProcessor.applyDynamicFocus(filteredCI)
+
+        let filteredCG = ciContext.createCGImage(filteredCI, from: extent)
         
         let rawImg      = rawCG.map      { UIImage(cgImage: $0) }
         let filteredImg = filteredCG.map { UIImage(cgImage: $0) }

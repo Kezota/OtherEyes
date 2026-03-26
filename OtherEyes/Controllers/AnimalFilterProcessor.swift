@@ -311,4 +311,94 @@ struct AnimalFilterProcessor: Sendable {
         addRGB.backgroundImage = rg.cropped(to: extent)
         return addRGB.outputImage?.cropped(to: extent) ?? saturated
     }
+
+    // MARK: - 🔍 Dynamic Focus (radial vignette blur — centre sharp, edges soft)
+
+    func applyDynamicFocus(_ image: CIImage) -> CIImage {
+        // Subtle vignette darkening at edges
+        let vignette = CIFilter.vignette()
+        vignette.inputImage = image
+        vignette.radius     = 2.0
+        vignette.intensity  = 0.35
+        let vignetted = vignette.outputImage?.cropped(to: image.extent) ?? image
+
+        // Very light Gaussian blur blended towards the edges via a radial gradient mask.
+        // We create a radial gradient (white at center → black at edges) and use it
+        // as a mask for CIMaskedVariableBlur.
+        let center = CIVector(x: image.extent.midX, y: image.extent.midY)
+        let innerRadius = min(image.extent.width, image.extent.height) * 0.35
+        let outerRadius = min(image.extent.width, image.extent.height) * 0.75
+
+        guard let radialGrad = CIFilter(name: "CIRadialGradient") else {
+            return vignetted
+        }
+        radialGrad.setValue(center, forKey: "inputCenter")
+        radialGrad.setValue(NSNumber(value: innerRadius), forKey: "inputRadius0")
+        radialGrad.setValue(NSNumber(value: outerRadius), forKey: "inputRadius1")
+        radialGrad.setValue(CIColor(red: 0, green: 0, blue: 0, alpha: 1), forKey: "inputColor0") // centre = no blur
+        radialGrad.setValue(CIColor(red: 1, green: 1, blue: 1, alpha: 1), forKey: "inputColor1") // edges = blur
+
+        guard let mask = radialGrad.outputImage?.cropped(to: image.extent),
+              let maskedBlur = CIFilter(name: "CIMaskedVariableBlur") else {
+            return vignetted
+        }
+        maskedBlur.setValue(vignetted, forKey: kCIInputImageKey)
+        maskedBlur.setValue(mask, forKey: "inputMask")
+        maskedBlur.setValue(NSNumber(value: 2.5), forKey: kCIInputRadiusKey)
+
+        return maskedBlur.outputImage?.cropped(to: image.extent) ?? vignetted
+    }
+
+    // MARK: - 🌊 Ambient Effects (per-animal continuous subtle motion)
+
+    func applyAmbientEffect(animal: Animal, to image: CIImage, params: AmbientEffectEngine.AmbientParams) -> CIImage {
+        switch animal {
+        case .fly:
+            // Micro jitter — tiny translation
+            let transform = CGAffineTransform(translationX: params.translationX, y: params.translationY)
+            return image.transformed(by: transform).cropped(to: image.extent)
+
+        case .fish:
+            // Gentle wave — shift the existing distortion center slightly
+            let center = CGPoint(
+                x: image.extent.midX + params.distortionOffsetX,
+                y: image.extent.midY + params.distortionOffsetY
+            )
+            guard let bump = CIFilter(name: "CIBumpDistortion") else { return image }
+            bump.setValue(image, forKey: kCIInputImageKey)
+            bump.setValue(CIVector(cgPoint: center), forKey: kCIInputCenterKey)
+            bump.setValue(NSNumber(value: Float(min(image.extent.width, image.extent.height) * 0.5)),
+                          forKey: kCIInputRadiusKey)
+            bump.setValue(NSNumber(value: 0.04), forKey: kCIInputScaleKey) // very subtle
+            return bump.outputImage?.cropped(to: image.extent) ?? image
+
+        case .cockroach:
+            // Dim flicker — slight exposure oscillation
+            guard let exposure = CIFilter(name: "CIExposureAdjust") else { return image }
+            exposure.setValue(image, forKey: kCIInputImageKey)
+            exposure.setValue(NSNumber(value: params.exposureDelta), forKey: kCIInputEVKey)
+            return exposure.outputImage ?? image
+
+        case .bird:
+            // Zoom breathing — barely perceptible scale
+            let cx = image.extent.midX
+            let cy = image.extent.midY
+            let s = params.scaleFactor
+            let transform = CGAffineTransform(translationX: cx, y: cy)
+                .scaledBy(x: s, y: s)
+                .translatedBy(x: -cx, y: -cy)
+            return image.transformed(by: transform).cropped(to: image.extent)
+
+        case .mantisShrimp:
+            // Slow hue drift
+            guard let hue = CIFilter(name: "CIHueAdjust") else { return image }
+            hue.setValue(image, forKey: kCIInputImageKey)
+            hue.setValue(NSNumber(value: params.hueShift), forKey: kCIInputAngleKey)
+            return hue.outputImage ?? image
+
+        default:
+            // Dog, Cat, Rat — no ambient effect
+            return image
+        }
+    }
 }

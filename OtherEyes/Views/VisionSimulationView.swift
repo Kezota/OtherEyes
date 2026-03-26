@@ -70,7 +70,7 @@ struct VisionSimulationView: View {
             if showInsight {
                 InsightPopup(animal: selectedAnimal, isShowing: $showInsight)
                     .zIndex(10)
-                    .transition(.opacity)
+                    .transition(.opacity.combined(with: .scale(scale: 0.95)))
             }
         }
         .ignoresSafeArea(edges: .bottom)
@@ -84,7 +84,9 @@ struct VisionSimulationView: View {
             cameraManager.stopSession()
         }
         .onChange(of: selectedAnimal) { _, newAnimal in
-            cameraManager.selectedAnimal = newAnimal
+            withAnimation(.easeInOut(duration: 0.35)) {
+                cameraManager.selectedAnimal = newAnimal
+            }
             // Re-trigger nudge each time the user switches animal
             showFunFactNudge = false
             scheduleNudge()
