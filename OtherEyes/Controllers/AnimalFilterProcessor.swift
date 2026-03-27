@@ -20,6 +20,9 @@ struct AnimalFilterProcessor: Sendable {
         case .fish:         return applyFishFilter(image)
         case .rat:          return applyRatFilter(image)
         case .mantisShrimp: return applyMantisFilter(image)
+        case .eagle:        return applyEagleFilter(image)
+        case .ant:          return applyAntFilter(image)
+        case .spider:       return applySpiderFilter(image)
         }
     }
 
@@ -55,7 +58,7 @@ struct AnimalFilterProcessor: Sendable {
         // High ISO simulation: boost exposure strongly — mimics wide pupil gathering light
         guard let exposureFilter = CIFilter(name: "CIExposureAdjust") else { return image }
         exposureFilter.setValue(image, forKey: kCIInputImageKey)
-        exposureFilter.setValue(NSNumber(value: 1.4), forKey: kCIInputEVKey)      // +1.4 EV
+        exposureFilter.setValue(NSNumber(value: 0.5), forKey: kCIInputEVKey)      // +0.5 EV (torch provides extra light)
         let exposed = exposureFilter.outputImage ?? image
 
         // Highlight clipping — mimic sensor saturation at high ISO
@@ -312,6 +315,189 @@ struct AnimalFilterProcessor: Sendable {
         return addRGB.outputImage?.cropped(to: extent) ?? saturated
     }
 
+    // MARK: - 🦅 Eagle: Hyper-focused telescopic vision (0.5× ultra-wide lens)
+    // Uses the hardware ultra-wide camera for a wider FOV, then applies strong
+    // radial centre focus so the centre is razor-sharp while the surrounding
+    // area falls off into soft blur — like an eagle locking onto prey.
+    // Filter budget: 3 filters (radial blur + sharpen + colour controls)
+    private func applyEagleFilter(_ image: CIImage) -> CIImage {
+        let extent = image.extent
+        let cx = extent.midX
+        let cy = extent.midY
+
+        // ── Step 1: Radial edge blur (centre sharp → edges very soft) ───────
+        // No digital zoom — the 0.5× ultra-wide lens already gives the wide field.
+        // Instead we make the surrounding area soft/blurry so the centre "pops"
+        // with intense clarity, simulating eagle tunnel-focus.
+        let innerR = min(extent.width, extent.height) * 0.12   // ← sharp zone (12% of frame, very tight focus)
+        let outerR = min(extent.width, extent.height) * 0.38   // ← blur fully kicks in at 38%
+        guard let radGrad = CIFilter(name: "CIRadialGradient") else { return image }
+        radGrad.setValue(CIVector(x: cx, y: cy), forKey: "inputCenter")
+        radGrad.setValue(NSNumber(value: innerR), forKey: "inputRadius0")
+        radGrad.setValue(NSNumber(value: outerR), forKey: "inputRadius1")
+        radGrad.setValue(CIColor(red: 0, green: 0, blue: 0), forKey: "inputColor0") // centre = no blur
+        radGrad.setValue(CIColor(red: 1, green: 1, blue: 1), forKey: "inputColor1") // edges = max blur
+        guard let mask = radGrad.outputImage?.cropped(to: extent),
+              let maskedBlur = CIFilter(name: "CIMaskedVariableBlur") else { return image }
+        maskedBlur.setValue(image, forKey: kCIInputImageKey)
+        maskedBlur.setValue(mask, forKey: "inputMask")
+        maskedBlur.setValue(NSNumber(value: 10.0), forKey: kCIInputRadiusKey) // ← edge blur radius (px), strong peripheral softening
+        let focused = maskedBlur.outputImage?.cropped(to: extent) ?? image
+
+        // ── Step 2: Centre sharpen ───────────────────────────────────────────
+        // CISharpenLuminance boosts edge detail in the already-sharp centre.
+        // sharpness 1.8 = extreme fovea crispness (human ≈ 0.4).
+        guard let sharpen = CIFilter(name: "CISharpenLuminance") else { return focused }
+        sharpen.setValue(focused, forKey: kCIInputImageKey)
+        sharpen.setValue(NSNumber(value: 1.8), forKey: kCIInputSharpnessKey)  // ← sharpness intensity
+        let sharpened = sharpen.outputImage ?? focused
+
+        // ── Step 3: Contrast + vivid colours ─────────────────────────────────
+        // Eagles have excellent colour vision; boost contrast and saturation
+        // so the focused target really "pops" against the soft periphery.
+        let controls = CIFilter.colorControls()
+        controls.inputImage = sharpened
+        controls.saturation = 1.45   // ← colour vividness (1.0 = normal, 1.45 = punchy)
+        controls.contrast   = 1.40   // ← contrast boost (1.0 = normal)
+        controls.brightness = 0.02   // ← very slight brightness lift
+        return controls.outputImage?.cropped(to: extent) ?? sharpened
+    }
+
+    // MARK: - 🐜 Ant: Ground-level macro vision
+    // Simulates a tiny creature's perspective — everything feels larger,
+    // closer, and slightly distorted. Shallow depth of field with the
+    // bottom (ground) sharper and the top (sky/background) blurrier.
+    // Filter budget: 3 filters (zoom + gradient blur + colour controls)
+    private func applyAntFilter(_ image: CIImage) -> CIImage {
+        let extent = image.extent
+        let cx = extent.midX
+        let cy = extent.midY
+
+        // ── Step 1: Macro zoom ───────────────────────────────────────────────
+        // 1.45× zoom — makes everything feel larger and closer, like being
+        // an ant right up against surfaces.
+        // Change this value to adjust the macro magnification (1.3 = mild, 1.6 = extreme).
+        let macroScale: CGFloat = 1.45  // ← triggers 1.45× macro zoom
+        let zoomIn = CGAffineTransform(translationX: cx, y: cy)
+            .scaledBy(x: macroScale, y: macroScale)
+            .translatedBy(x: -cx, y: -cy)
+        let zoomed = image.transformed(by: zoomIn).cropped(to: extent)
+
+        // ── Step 2: Vertical gradient blur (bottom sharp → top blurry) ──────
+        // Simulates shallow depth of field: ground-level is in focus,
+        // background (top of frame) falls out of focus.
+        // The gradient goes from black (bottom = no blur) to white (top = blur).
+        guard let linGrad = CIFilter(name: "CILinearGradient") else { return zoomed }
+        // inputPoint0 = bottom of frame (sharp), inputPoint1 = top of frame (blurry)
+        linGrad.setValue(CIVector(x: cx, y: extent.minY),       forKey: "inputPoint0")  // bottom
+        linGrad.setValue(CIVector(x: cx, y: extent.maxY * 0.6), forKey: "inputPoint1")  // ← blur starts at 60% up
+        linGrad.setValue(CIColor(red: 0, green: 0, blue: 0), forKey: "inputColor0") // bottom = sharp
+        linGrad.setValue(CIColor(red: 1, green: 1, blue: 1), forKey: "inputColor1") // top = blurry
+        guard let gradMask = linGrad.outputImage?.cropped(to: extent),
+              let maskedBlur = CIFilter(name: "CIMaskedVariableBlur") else { return zoomed }
+        maskedBlur.setValue(zoomed, forKey: kCIInputImageKey)
+        maskedBlur.setValue(gradMask, forKey: "inputMask")
+        maskedBlur.setValue(NSNumber(value: 8.0), forKey: kCIInputRadiusKey)  // ← max blur at top (px), strong depth-of-field
+        let depthBlurred = maskedBlur.outputImage?.cropped(to: extent) ?? zoomed
+
+        // ── Step 3: Subtle lens distortion ───────────────────────────────────
+        // Slight barrel distortion gives a close-up lens / macro lens feel.
+        // Scale 0.15 = very subtle (0.5+ would be fisheye).
+        guard let bump = CIFilter(name: "CIBumpDistortion") else { return depthBlurred }
+        bump.setValue(depthBlurred, forKey: kCIInputImageKey)
+        bump.setValue(CIVector(cgPoint: CGPoint(x: cx, y: cy)), forKey: kCIInputCenterKey)
+        let bumpRadius = Float(min(extent.width, extent.height) * 0.7)  // ← distortion covers 70% of frame
+        bump.setValue(NSNumber(value: bumpRadius), forKey: kCIInputRadiusKey)
+        bump.setValue(NSNumber(value: 0.15), forKey: kCIInputScaleKey)   // ← subtle barrel warp strength
+        let distorted = bump.outputImage?.cropped(to: extent) ?? depthBlurred
+
+        // ── Step 4: Colour simplification ────────────────────────────────────
+        // Ants have limited colour vision — reduce saturation and contrast
+        // for a muted, earthy tone.
+        let controls = CIFilter.colorControls()
+        controls.inputImage = distorted
+        controls.saturation = 0.55   // ← reduced colour (1.0 = normal, 0.55 = muted)
+        controls.contrast   = 0.90   // ← slightly lower contrast
+        controls.brightness = -0.04  // ← slightly dimmer (ground-level light)
+        return controls.outputImage?.cropped(to: extent) ?? distorted
+    }
+
+    // MARK: - 🕷️ Spider: Fragmented, multi-zone motion vision
+    // Simulates secondary eyes overlapping. Center is sharp, peripheral
+    // vision is split into two offset and blurred overlapping zones.
+    // Also gets motion highlights applied in CameraManager.
+    private func applySpiderFilter(_ image: CIImage) -> CIImage {
+        let extent = image.extent
+        let cx = extent.midX
+        let cy = extent.midY
+
+        // ── Step 1: Base Center Eye ──────────────────────────
+        // Sharp, slightly zoomed in
+        let scale: CGFloat = 1.05
+        let centerTrans = CGAffineTransform(translationX: cx, y: cy)
+            .scaledBy(x: scale, y: scale)
+            .translatedBy(x: -cx, y: -cy)
+        let base = image.transformed(by: centerTrans).cropped(to: extent)
+
+        // ── Step 2: Peripheral Eye 1 (Top Left) ──────────────
+        // Blurry, offset (-6, -12), masked to top-left
+        let p1Offset = CGAffineTransform(translationX: -6, y: -12)
+        let p1Img = image.transformed(by: p1Offset).cropped(to: extent)
+        
+        let blur = CIFilter.gaussianBlur()
+        blur.inputImage = p1Img
+        blur.radius = 3.0
+        let p1Blurred = blur.outputImage?.cropped(to: extent) ?? p1Img
+
+        let opaque = CIColor(red: 0.65, green: 0.65, blue: 0.65) // 65% opacity mask
+        let transp = CIColor(red: 0, green: 0, blue: 0)
+
+        guard let grad1 = CIFilter(name: "CIRadialGradient") else { return base }
+        let c1 = CIVector(x: extent.minX + extent.width * 0.25, y: extent.maxY - extent.height * 0.25)
+        grad1.setValue(c1, forKey: "inputCenter")
+        grad1.setValue(NSNumber(value: extent.width * 0.1), forKey: "inputRadius0") // bright center
+        grad1.setValue(NSNumber(value: extent.width * 0.6), forKey: "inputRadius1") // fades out
+        grad1.setValue(opaque, forKey: "inputColor0")
+        grad1.setValue(transp, forKey: "inputColor1")
+        guard let mask1 = grad1.outputImage?.cropped(to: extent) else { return base }
+
+        let blend = CIFilter.blendWithMask()
+        blend.inputImage = p1Blurred
+        blend.backgroundImage = base
+        blend.maskImage = mask1
+        let comp1 = blend.outputImage?.cropped(to: extent) ?? base
+
+        // ── Step 3: Peripheral Eye 2 (Bottom Right) ──────────
+        // Blurry, offset (8, 6), masked to bottom-right
+        let p2Offset = CGAffineTransform(translationX: 8, y: 6)
+        let p2Img = image.transformed(by: p2Offset).cropped(to: extent)
+
+        blur.inputImage = p2Img
+        blur.radius = 4.0
+        let p2Blurred = blur.outputImage?.cropped(to: extent) ?? p2Img
+
+        guard let grad2 = CIFilter(name: "CIRadialGradient") else { return comp1 }
+        let c2 = CIVector(x: extent.maxX - extent.width * 0.25, y: extent.minY + extent.height * 0.25)
+        grad2.setValue(c2, forKey: "inputCenter")
+        grad2.setValue(NSNumber(value: extent.width * 0.1), forKey: "inputRadius0")
+        grad2.setValue(NSNumber(value: extent.width * 0.6), forKey: "inputRadius1")
+        grad2.setValue(opaque, forKey: "inputColor0")
+        grad2.setValue(transp, forKey: "inputColor1")
+        guard let mask2 = grad2.outputImage?.cropped(to: extent) else { return comp1 }
+
+        blend.inputImage = p2Blurred
+        blend.backgroundImage = comp1
+        blend.maskImage = mask2
+        let comp2 = blend.outputImage?.cropped(to: extent) ?? comp1
+
+        // ── Step 4: Colour/Contrast Adjustment ───────────────
+        let controls = CIFilter.colorControls()
+        controls.inputImage = comp2
+        controls.saturation = 0.7  // mute colours slightly
+        controls.contrast = 1.25   // boost contrast
+        return controls.outputImage?.cropped(to: extent) ?? comp2
+    }
+
     // MARK: - 🔍 Dynamic Focus (radial vignette blur — centre sharp, edges soft)
 
     func applyDynamicFocus(_ image: CIImage) -> CIImage {
@@ -396,9 +582,72 @@ struct AnimalFilterProcessor: Sendable {
             hue.setValue(NSNumber(value: params.hueShift), forKey: kCIInputAngleKey)
             return hue.outputImage ?? image
 
+        case .eagle:
+            // Zoom breathing — slow, subtle focus "pulsing" like an eagle scanning
+            let cx = image.extent.midX
+            let cy = image.extent.midY
+            // Reuse scaleFactor from AmbientParams (computed in AmbientEffectEngine)
+            let s = params.eagleBreathScale
+            let transform = CGAffineTransform(translationX: cx, y: cy)
+                .scaledBy(x: s, y: s)
+                .translatedBy(x: -cx, y: -cy)
+            return image.transformed(by: transform).cropped(to: image.extent)
+
         default:
-            // Dog, Cat, Rat — no ambient effect
+            // Dog, Cat, Rat, Ant — no ambient effect
             return image
         }
+    }
+
+    // MARK: - 🪰 Fly Ghosting (blend previous frames for motion trails)
+
+    /// Blends the current filtered frame with up to 2 previous frames
+    /// at decreasing opacity, creating a ghost/trail effect for moving objects.
+    func applyFlyGhosting(current: CIImage, previousFrames: [CIImage]) -> CIImage {
+        var result = current
+        let extent = current.extent
+        // Ghost opacity: frame-1 = 30%, frame-2 = 15%
+        let opacities: [Float] = [0.30, 0.15]
+
+        for (i, prevFrame) in previousFrames.prefix(2).enumerated() {
+            // Create opacity mask (constant grey)
+            let alpha = opacities[i]
+            let mask = CIImage(color: CIColor(red: CGFloat(alpha),
+                                              green: CGFloat(alpha),
+                                              blue: CGFloat(alpha)))
+                .cropped(to: extent)
+
+            // Blend: result = result * (1-alpha) + prevFrame * alpha
+            let blend = CIFilter.blendWithMask()
+            blend.inputImage = prevFrame.cropped(to: extent)
+            blend.backgroundImage = result
+            blend.maskImage = mask
+            result = blend.outputImage?.cropped(to: extent) ?? result
+        }
+        return result
+    }
+
+    // MARK: - 🪳 Cockroach Light Flicker (exposure spike on brightness change)
+
+    /// Applies a brief exposure boost when the LightSensitivityDetector
+    /// reports a brightness spike. Fades out quickly.
+    func applyCockroachFlicker(image: CIImage, flickerIntensity: Float) -> CIImage {
+        guard flickerIntensity > 0.01 else { return image }
+
+        guard let exposure = CIFilter(name: "CIExposureAdjust") else { return image }
+        exposure.setValue(image, forKey: kCIInputImageKey)
+        // Map flicker intensity to EV boost (max ~+1.2 EV at full flicker)
+        exposure.setValue(NSNumber(value: flickerIntensity * 3.5), forKey: kCIInputEVKey)
+        return exposure.outputImage ?? image
+    }
+
+    // MARK: - 🐜 Ant Parallax (gyroscope-based camera shift)
+
+    /// Shifts the image by X/Y offsets derived from device tilt,
+    /// creating a parallax depth illusion.
+    func applyParallax(image: CIImage, offsetX: CGFloat, offsetY: CGFloat) -> CIImage {
+        guard abs(offsetX) > 0.5 || abs(offsetY) > 0.5 else { return image }
+        let shifted = image.transformed(by: CGAffineTransform(translationX: offsetX, y: offsetY))
+        return shifted.cropped(to: image.extent)
     }
 }

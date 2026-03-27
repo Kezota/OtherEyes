@@ -33,6 +33,9 @@ final class AmbientEffectEngine: @unchecked Sendable {
 
         /// Hue rotation delta in radians (Mantis Shrimp)
         var hueShift: Float = 0
+
+        /// Eagle: slow zoom breathing (subtle focus pulse)
+        var eagleBreathScale: CGFloat = 1.0
     }
 
     /// Current frame's ambient parameters. Read from the render thread.
@@ -86,6 +89,10 @@ final class AmbientEffectEngine: @unchecked Sendable {
         // Mantis Shrimp: slow hue drift — ±5° (≈ ±0.087 radians)
         let hueCycle = 4.0
         p.hueShift = Float(sin(t * 2 * .pi / hueCycle) * 0.087)
+
+        // Eagle: slow zoom breathing — ±0.7% scale over 4s
+        let eagleCycle = 4.0
+        p.eagleBreathScale = 1.0 + CGFloat(sin(t * 2 * .pi / eagleCycle) * 0.007)
 
         currentParams = p
     }

@@ -23,10 +23,11 @@ fileprivate final class AtomicAnimal: @unchecked Sendable {
 // MARK: - Camera lens preference per animal
 extension Animal {
     /// Animals that benefit from the real 0.5× ultra-wide camera.
+    /// Eagle uses ultra-wide for wider FOV — focus comes from radial blur, not zoom.
     var prefersUltraWide: Bool {
         switch self {
-        case .bird, .fish: return true
-        default:           return false
+        case .bird, .fish, .eagle: return true
+        default:                   return false
         }
     }
 }
@@ -48,6 +49,12 @@ class CameraManager: NSObject, ObservableObject {
     // ── Transition & Ambient engines ─────────────────────────────────────
     nonisolated(unsafe) let transitionManager = VisionTransitionManager()
     nonisolated(unsafe) let ambientEngine = AmbientEffectEngine()
+
+    // ── Perception-based behavioral helpers ──────────────────────────────
+    nonisolated(unsafe) let temporalBuffer = TemporalBuffer(capacity: 4)
+    nonisolated(unsafe) let motionAnalyzer = MotionAnalyzer()
+    nonisolated(unsafe) let parallaxManager = ParallaxManager()
+    nonisolated(unsafe) let lightDetector = LightSensitivityDetector()
 
     // Retained strongly so AVFoundation delegate is never deallocated
     nonisolated(unsafe) private var delegateWrapper: CameraDelegateWrapper?
@@ -74,6 +81,9 @@ class CameraManager: NSObject, ObservableObject {
             if needsUltraWide != currentLensIsUltraWide {
                 switchCameraLens(useUltraWide: needsUltraWide)
             }
+
+            // 🐱 Cat night-vision: turn torch on at low intensity
+            setTorch(on: selectedAnimal == .cat)
         }
     }
     
@@ -121,7 +131,11 @@ class CameraManager: NSObject, ObservableObject {
                                                 ciContext: self.ciContext,
                                                 atomicAnimal: self.atomicAnimal,
                                                 transitionManager: self.transitionManager,
-                                                ambientEngine: self.ambientEngine)
+                                                ambientEngine: self.ambientEngine,
+                                                temporalBuffer: self.temporalBuffer,
+                                                motionAnalyzer: self.motionAnalyzer,
+                                                parallaxManager: self.parallaxManager,
+                                                lightDetector: self.lightDetector)
             self.delegateWrapper = wrapper
             self.videoOutput.setSampleBufferDelegate(wrapper, queue: self.processingQueue)
             self.videoOutput.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA]
@@ -175,6 +189,7 @@ class CameraManager: NSObject, ObservableObject {
 
     func startSession() {
         ambientEngine.start()
+        parallaxManager.start()
         sessionQueue.async { [weak self] in
             guard let self, !self.session.isRunning else { return }
             self.session.startRunning()
@@ -183,9 +198,32 @@ class CameraManager: NSObject, ObservableObject {
     
     func stopSession() {
         ambientEngine.stop()
+        parallaxManager.stop()
+        setTorch(on: false)  // always kill torch when leaving
         sessionQueue.async { [weak self] in
             guard let self, self.session.isRunning else { return }
             self.session.stopRunning()
+        }
+    }
+
+    // MARK: - Torch (flashlight) control
+    /// Turns the device torch on at low intensity (cat night-vision) or off.
+    private func setTorch(on: Bool) {
+        sessionQueue.async {
+            guard let device = AVCaptureDevice.default(for: .video),
+                  device.hasTorch else { return }
+            do {
+                try device.lockForConfiguration()
+                if on {
+                    // Low intensity so it's not blinding — simulates tapetum glow
+                    try device.setTorchModeOn(level: 0.08)  // 0.0–1.0, 0.08 ≈ very faint glow
+                } else {
+                    device.torchMode = .off
+                }
+                device.unlockForConfiguration()
+            } catch {
+                // Torch unavailable — silently ignore
+            }
         }
     }
     
@@ -207,21 +245,34 @@ final class CameraDelegateWrapper: NSObject, AVCaptureVideoDataOutputSampleBuffe
     private let atomicAnimal: AtomicAnimal
     private let transitionManager: VisionTransitionManager
     private let ambientEngine: AmbientEffectEngine
+    private let temporalBuffer: TemporalBuffer
+    private let motionAnalyzer: MotionAnalyzer
+    private let parallaxManager: ParallaxManager
+    private let lightDetector: LightSensitivityDetector
 
     private var lastFlyFrameTime: TimeInterval = 0
+    private var previousRawFrame: CIImage?   // for rat motion detection (raw, unfiltered)
     
     fileprivate init(manager: CameraManager,
                      filterProcessor: AnimalFilterProcessor,
                      ciContext: CIContext,
                      atomicAnimal: AtomicAnimal,
                      transitionManager: VisionTransitionManager,
-                     ambientEngine: AmbientEffectEngine) {
+                     ambientEngine: AmbientEffectEngine,
+                     temporalBuffer: TemporalBuffer,
+                     motionAnalyzer: MotionAnalyzer,
+                     parallaxManager: ParallaxManager,
+                     lightDetector: LightSensitivityDetector) {
         self.manager = manager
         self.filterProcessor = filterProcessor
         self.ciContext = ciContext
         self.atomicAnimal = atomicAnimal
         self.transitionManager = transitionManager
         self.ambientEngine = ambientEngine
+        self.temporalBuffer = temporalBuffer
+        self.motionAnalyzer = motionAnalyzer
+        self.parallaxManager = parallaxManager
+        self.lightDetector = lightDetector
     }
     
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
@@ -239,7 +290,7 @@ final class CameraDelegateWrapper: NSObject, AVCaptureVideoDataOutputSampleBuffe
         let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
         let extent = ciImage.extent
         
-        // ── Raw image (always current frame) ─────────────────────────────
+        // ── Raw image (always current frame) ────────────────────────────
         let rawCG = ciContext.createCGImage(ciImage, from: extent)
 
         // ── Filtered image with transition + ambient + dynamic focus ─────
@@ -272,6 +323,45 @@ final class CameraDelegateWrapper: NSObject, AVCaptureVideoDataOutputSampleBuffe
 
         // Apply dynamic focus (centre sharp, edges softly blurred)
         filteredCI = filterProcessor.applyDynamicFocus(filteredCI)
+
+        // ── Perception-based behavioral effects ─────────────────────────────
+
+        // 🪰 Fly: ghost trails from previous frames
+        if animal == .fly {
+            let prev = temporalBuffer.lastFrames(3).dropFirst().map { $0 }  // skip current
+            if !prev.isEmpty {
+                filteredCI = filterProcessor.applyFlyGhosting(current: filteredCI, previousFrames: prev)
+            }
+        }
+
+        // 🐀 Rat: motion detection — highlight movement, dim static
+        if animal == .rat, let prevRaw = previousRawFrame {
+            let mask = motionAnalyzer.motionMask(current: ciImage, previous: prevRaw)
+            filteredCI = motionAnalyzer.applyMotionHighlight(image: filteredCI, motionMask: mask)
+        }
+
+        // 🕷️ Spider: motion detection — heavily brighten and contrast moving areas
+        if animal == .spider, let prevRaw = previousRawFrame {
+            let mask = motionAnalyzer.motionMask(current: ciImage, previous: prevRaw)
+            filteredCI = motionAnalyzer.applySpiderMotionHighlight(image: filteredCI, motionMask: mask, rawImage: ciImage)
+        }
+
+        // 🐜 Ant: parallax shift based on device tilt
+        if animal == .ant {
+            let offset = parallaxManager.currentOffset
+            filteredCI = filterProcessor.applyParallax(image: filteredCI, offsetX: offset.x, offsetY: offset.y)
+        }
+
+        // 🪳 Cockroach: light sensitivity flicker
+        if animal == .cockroach {
+            lightDetector.update(image: ciImage, context: ciContext)
+            filteredCI = filterProcessor.applyCockroachFlicker(image: filteredCI, flickerIntensity: lightDetector.flickerIntensity)
+        }
+
+        // Push filtered frame into temporal buffer (for fly ghost trails)
+        temporalBuffer.push(filteredCI)
+        // Store raw frame for rat & spider motion detection
+        previousRawFrame = ciImage
 
         let filteredCG = ciContext.createCGImage(filteredCI, from: extent)
         

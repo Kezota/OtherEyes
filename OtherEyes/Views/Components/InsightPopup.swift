@@ -10,14 +10,15 @@ struct InsightPopup: View {
     @Binding var isShowing: Bool
 
     @State private var dragOffset: CGFloat = 0
-    @State private var opacity: Double = 0
+    @State private var backdropOpacity: Double = 0   // backdrop fades independently
+    @State private var cardOpacity: Double = 0
     @State private var yOffset: CGFloat = 60
     @State private var popupScale: CGFloat = 0.92
 
     var body: some View {
         ZStack {
-            // Dimmed backdrop — tap to dismiss
-            Color.black.opacity(0.45)
+            // Dimmed backdrop — fades in independently (no slide)
+            Color.black.opacity(0.45 * backdropOpacity)
                 .ignoresSafeArea()
                 .onTapGesture { dismiss() }
 
@@ -68,13 +69,13 @@ struct InsightPopup: View {
                         Spacer()
 
                         // Close button
-                        Button(action: dismiss) {
-                            Image(systemName: "xmark")
-                                .font(.system(size: 13, weight: .bold))
-                                .foregroundStyle(.white.opacity(0.6))
-                                .frame(width: 30, height: 30)
-                                .background(Color.white.opacity(0.12), in: Circle())
-                        }
+//                        Button(action: dismiss) {
+//                            Image(systemName: "xmark")
+//                                .font(.system(size: 13, weight: .bold))
+//                                .foregroundStyle(.white.opacity(0.6))
+//                                .frame(width: 30, height: 30)
+//                                .background(Color.white.opacity(0.12), in: Circle())
+//                        }
                     }
                     .padding(.horizontal, 20)
                     .padding(.bottom, 18)
@@ -142,7 +143,9 @@ struct InsightPopup: View {
                     .shadow(color: Color(red: 0.3, green: 0.2, blue: 0.6).opacity(0.15), radius: 20, x: 0, y: 4)
                 }
                 .padding(.horizontal, 16)
-                .offset(y: dragOffset)
+                .offset(y: dragOffset + yOffset)
+                .scaleEffect(popupScale)
+                .opacity(cardOpacity)
                 .gesture(
                     DragGesture()
                         .onChanged { value in
@@ -164,12 +167,14 @@ struct InsightPopup: View {
                 Spacer().frame(height: 32)
             }
         }
-        .opacity(opacity)
-        .offset(y: yOffset)
-        .scaleEffect(popupScale)
         .onAppear {
+            // Backdrop fades in quickly
+            withAnimation(.easeOut(duration: 0.25)) {
+                backdropOpacity = 1
+            }
+            // Card slides up + scales in
             withAnimation(.spring(response: 0.45, dampingFraction: 0.78)) {
-                opacity = 1
+                cardOpacity = 1
                 yOffset = 0
                 popupScale = 1.0
             }
@@ -178,7 +183,8 @@ struct InsightPopup: View {
 
     private func dismiss() {
         withAnimation(.easeOut(duration: 0.22)) {
-            opacity = 0
+            backdropOpacity = 0
+            cardOpacity = 0
             yOffset = 60
             popupScale = 0.92
         }

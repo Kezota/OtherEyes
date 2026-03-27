@@ -6,7 +6,7 @@
 import Foundation
 
 enum Animal: String, CaseIterable, Identifiable, Hashable {
-    case dog, cat, fly, cockroach, bird, fish, mantisShrimp, rat
+    case dog, cat, fly, cockroach, bird, fish, mantisShrimp, rat, eagle, ant, spider
 
     var id: String { rawValue }
 
@@ -20,6 +20,9 @@ enum Animal: String, CaseIterable, Identifiable, Hashable {
         case .fish:         return "Fish"
         case .mantisShrimp: return "Mantis Shrimp"
         case .rat:          return "Rat"
+        case .eagle:        return "Eagle"
+        case .ant:          return "Ant"
+        case .spider:       return "Spider"
         }
     }
 
@@ -33,6 +36,9 @@ enum Animal: String, CaseIterable, Identifiable, Hashable {
         case .fish:         return "🐟"
         case .mantisShrimp: return "🦐"
         case .rat:          return "🐀"
+        case .eagle:        return "🦅"
+        case .ant:          return "🐜"
+        case .spider:       return "🕷️"
         }
     }
 
@@ -43,9 +49,12 @@ enum Animal: String, CaseIterable, Identifiable, Hashable {
         case .fly:          return "Compound mosaic vision"
         case .cockroach:    return "Blurry, motion-sensitive eyes"
         case .bird:         return "340° wide-angle vision"
-        case .fish:         return "Wide-angle underwater vision"
+        case .fish:         return "Wide-angle underwater"
         case .mantisShrimp: return "12-16 color receptors"
         case .rat:          return "Blurry, dim, greenish vision"
+        case .eagle:        return "Hyper-focuse telescopic"
+        case .ant:          return "Macro ground-level vision"
+        case .spider:       return "Fragmented, motion-sensitive"
         }
     }
 
@@ -67,6 +76,12 @@ enum Animal: String, CaseIterable, Identifiable, Hashable {
             return "Mantis shrimp have up to 16 types of color receptors, while humans only have 3. They can detect light that we cannot even see."
         case .rat:
             return "Rats have very blurry vision, but they can detect even small movements in low light and rely more on their other senses to navigate."
+        case .eagle:
+            return "Eagles can spot a rabbit from over 3 km away. Their eyes have around 1 million photoreceptors per mm², giving them 4–8× sharper vision than humans."
+        case .ant:
+            return "Most ants have very poor vision and can only see a few centimeters ahead. They navigate primarily using chemical trails and touch rather than sight."
+        case .spider:
+            return "Most spiders have 8 eyes arranged in different pairs. While their main pair sees sharp details, the secondary eyes are specialized for detecting motion and light changes."
         }
     }
 
@@ -80,6 +95,26 @@ enum Animal: String, CaseIterable, Identifiable, Hashable {
         case .fish:         return ["#A8D4E8", "#DCF0F8"]
         case .mantisShrimp: return ["#F0B8E8", "#FDE8F8"]
         case .rat:          return ["#B8D4B8", "#E0EDD8"]
+        case .eagle:        return ["#E8D4A8", "#FDF5DC"]  // warm golden
+        case .ant:          return ["#C8A888", "#E8DCC8"]  // earthy brown
+        case .spider:       return ["#D8B8E8", "#F5E8FD"]  // muted purple
+        }
+    }
+
+    /// Short instruction to help the user get the most immersive experience.
+    var immersionTip: String {
+        switch self {
+        case .dog:          return "Move slowly — dogs track motion, not detail"
+        case .cat:          return "Try a dim room for the full night-vision effect"
+        case .fly:          return "Wave your hand — notice the slow-motion trails"
+        case .cockroach:    return "Point at a light, then look away quickly"
+        case .bird:         return "Look around — you have almost 360° vision"
+        case .fish:         return "Move the phone gently, like drifting underwater"
+        case .mantisShrimp: return "Look at colorful objects — you see beyond human colors"
+        case .rat:          return "Move objects in frame — motion is all you see"
+        case .eagle:        return "Point at something far away — focus locks on center"
+        case .ant:          return "Place your phone near the ground and look around"
+        case .spider:       return "Watch moving objects pop out across your fragmented vision"
         }
     }
 }

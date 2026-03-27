@@ -19,6 +19,13 @@ struct VisionSimulationView: View {
     @State private var nudgePulse = false
     @State private var insightPulse = false
 
+    // Track which animals the user has already seen insight for
+    @AppStorage("visitedAnimals") private var visitedAnimalsRaw: String = ""
+
+    // Immersion tip toast
+    @State private var showImmersionTip = false
+    @State private var immersionTipId: UUID = UUID()  // forces re-animation on animal change
+
     init(initialAnimal: Animal) {
         self.initialAnimal = initialAnimal
         _selectedAnimal = State(initialValue: initialAnimal)
@@ -72,13 +79,37 @@ struct VisionSimulationView: View {
                     .zIndex(10)
                     .transition(.opacity.combined(with: .scale(scale: 0.95)))
             }
+
+            // Immersion tip toast (below top bar)
+            if showImmersionTip && !showInsight {
+                VStack {
+                    ImmersionTipToast(animal: selectedAnimal)
+                        .id(immersionTipId)
+                        .padding(.top, 64)
+                    Spacer()
+                }
+                .transition(.opacity.combined(with: .move(edge: .top)))
+                .zIndex(4)
+            }
         }
         .ignoresSafeArea(edges: .bottom)
         .navigationBarHidden(true)
         .onAppear {
             cameraManager.selectedAnimal = selectedAnimal
             cameraManager.startSession()
-            scheduleNudge()
+            // Auto-show insight for the first visit
+            if !visitedAnimals.contains(selectedAnimal.rawValue) {
+                markVisited(selectedAnimal)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                        showInsight = true
+                    }
+                }
+            } else {
+                scheduleNudge()
+            }
+            // Show immersion tip
+            showImmersionTip(for: selectedAnimal)
         }
         .onDisappear {
             cameraManager.stopSession()
@@ -87,9 +118,21 @@ struct VisionSimulationView: View {
             withAnimation(.easeInOut(duration: 0.35)) {
                 cameraManager.selectedAnimal = newAnimal
             }
-            // Re-trigger nudge each time the user switches animal
+            // Auto-show insight for unvisited animals
             showFunFactNudge = false
-            scheduleNudge()
+            if !visitedAnimals.contains(newAnimal.rawValue) {
+                markVisited(newAnimal)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+                    guard !showInsight else { return }
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                        showInsight = true
+                    }
+                }
+            } else {
+                scheduleNudge()
+            }
+            // Show immersion tip for new animal
+            showImmersionTip(for: newAnimal)
         }
         .onChange(of: showInsight) { _, open in
             if !open { scheduleNudge(delay: 20) }   // nudge again after closing
@@ -108,6 +151,34 @@ struct VisionSimulationView: View {
                 withAnimation(.easeOut(duration: 0.4)) {
                     showFunFactNudge = false
                 }
+            }
+        }
+    }
+
+    // MARK: - Visited Animals Tracking
+    private var visitedAnimals: Set<String> {
+        Set(visitedAnimalsRaw.split(separator: ",").map(String.init))
+    }
+
+    private func markVisited(_ animal: Animal) {
+        var set = visitedAnimals
+        set.insert(animal.rawValue)
+        visitedAnimalsRaw = set.joined(separator: ",")
+    }
+
+    // MARK: - Immersion Tip Toast
+    private func showImmersionTip(for animal: Animal) {
+        // Reset with new ID to force re-animation if already showing
+        immersionTipId = UUID()
+        withAnimation(.easeOut(duration: 0.35)) {
+            showImmersionTip = true
+        }
+        // Auto-hide after 4 seconds
+        let currentId = immersionTipId
+        DispatchQueue.main.asyncAfter(deadline: .now() + 4.0) { [self] in
+            guard immersionTipId == currentId else { return }  // stale
+            withAnimation(.easeOut(duration: 0.5)) {
+                showImmersionTip = false
             }
         }
     }
@@ -359,5 +430,35 @@ struct FunFactNudge: View {
         .offset(y: bounce ? -3 : 0)
         .animation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true), value: bounce)
         .onAppear { bounce = true }
+    }
+}
+
+// MARK: - Immersion Tip Toast
+struct ImmersionTipToast: View {
+    let animal: Animal
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Text(animal.emoji)
+                .font(.system(size: 20))
+
+            Text(animal.immersionTip)
+                .font(.system(size: 13, weight: .medium, design: .rounded))
+                .foregroundStyle(.white.opacity(0.9))
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background {
+            Capsule()
+                .fill(.ultraThinMaterial)
+                .overlay {
+                    Capsule()
+                        .stroke(.white.opacity(0.2), lineWidth: 1)
+                }
+                .shadow(color: .black.opacity(0.3), radius: 12, x: 0, y: 4)
+        }
+        .padding(.horizontal, 24)
     }
 }
