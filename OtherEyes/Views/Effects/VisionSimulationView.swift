@@ -17,7 +17,7 @@ struct VisionSimulationView: View {
     @Environment(\.dismiss) private var dismiss
 
     // Track which animals the user has already seen insight for
-    @AppStorage("visitedAnimals_v2") private var visitedAnimalsRaw: String = ""
+    @AppStorage("visitedAnimals") private var visitedAnimalsRaw: String = ""
     @State private var pendingAutoInsightAnimal: Animal? = nil
     @State private var pendingImmersionTipForAnimal: Animal? = nil
 

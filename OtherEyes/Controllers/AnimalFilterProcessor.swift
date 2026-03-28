@@ -5,6 +5,87 @@
 
 import CoreImage
 import CoreImage.CIFilterBuiltins
+import UIKit
+
+@MainActor
+fileprivate enum SpiderLayoutCache {
+    struct Assets {
+        let masks: [CIImage]
+        let gutters: CIImage
+        let size: CGSize
+    }
+
+    static let shared: Assets = {
+        let size = CGSize(width: 1000, height: 1000)
+        let W = size.width
+        let H = size.height
+
+        // Define the 4 corners of the large central panel
+        let C1 = CGPoint(x: 0.20 * W, y: 0.35 * H)
+        let C2 = CGPoint(x: 0.85 * W, y: 0.25 * H)
+        let C3 = CGPoint(x: 0.80 * W, y: 0.70 * H)
+        let C4 = CGPoint(x: 0.15 * W, y: 0.65 * H)
+
+        // Define the 4 corners of the screen
+        let TL = CGPoint(x: 0, y: 0)
+        let TR = CGPoint(x: W, y: 0)
+        let BR = CGPoint(x: W, y: H)
+        let BL = CGPoint(x: 0, y: H)
+
+        // Define the 4 outward rays connecting center to edge
+        let M1 = CGPoint(x: 0.45 * W, y: 0)
+        let M2 = CGPoint(x: W, y: 0.55 * H)
+        let M3 = CGPoint(x: 0.55 * W, y: H)
+        let M4 = CGPoint(x: 0, y: 0.45 * H)
+
+        let polys: [[CGPoint]] = [
+            [C1, C2, C3, C4], // Center
+            [M1, TR, M2, C2, C1], // TopRight
+            [M2, BR, M3, C3, C2], // BottomRight
+            [M3, BL, M4, C4, C3], // BottomLeft
+            [M4, TL, M1, C1, C4]  // TopLeft
+        ]
+
+        var masks: [CIImage] = []
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        
+        let renderer = UIGraphicsImageRenderer(size: size, format: format)
+        
+        for poly in polys {
+            let img = renderer.image { ctx in
+                let cg = ctx.cgContext
+                cg.setFillColor(UIColor.white.cgColor)
+                cg.move(to: poly[0])
+                for p in poly.dropFirst() { cg.addLine(to: p) }
+                cg.closePath()
+                cg.fillPath()
+            }
+            if let cg = img.cgImage { masks.append(CIImage(cgImage: cg)) }
+        }
+
+        let guttersImg = renderer.image { ctx in
+            let cg = ctx.cgContext
+            cg.setStrokeColor(UIColor.black.cgColor)
+            cg.setLineWidth(4.0) // Thinner comic book gutter lines
+            cg.setLineJoin(.bevel)
+            
+            // Draw all lines outlining the regions
+            let lines: [(CGPoint, CGPoint)] = [
+                (C1, C2), (C2, C3), (C3, C4), (C4, C1), // Center box edges
+                (C1, M1), (C2, M2), (C3, M3), (C4, M4)  // Outer ray edges
+            ]
+            for (p1, p2) in lines {
+                cg.move(to: p1)
+                cg.addLine(to: p2)
+            }
+            cg.strokePath()
+        }
+        
+        let guttersCI = CIImage(cgImage: guttersImg.cgImage!)
+        return Assets(masks: masks, gutters: guttersCI, size: size)
+    }()
+}
 
 struct AnimalFilterProcessor: Sendable {
 
@@ -395,80 +476,84 @@ struct AnimalFilterProcessor: Sendable {
         return controls.outputImage?.cropped(to: extent) ?? distorted
     }
 
-    // MARK: - 🕷️ Spider: Fragmented, multi-zone motion vision
-    // Simulates secondary eyes overlapping. Center is sharp, peripheral
-    // vision is split into two offset and blurred overlapping zones.
-    // Also gets motion highlights applied in CameraManager.
+    // MARK: - 🕷️ Spider: Multiple Camera View (Comic Layout)
+    // Simulates secondary eyes via scattered, duplicated camera panels separated by thick black gutters.
     private func applySpiderFilter(_ image: CIImage) -> CIImage {
         let extent = image.extent
         let cx = extent.midX
         let cy = extent.midY
 
-        // ── Step 1: Base Center Eye ──────────────────────────
-        // Sharp, slightly zoomed in
-        let scale: CGFloat = 1.05
-        let centerTrans = CGAffineTransform(translationX: cx, y: cy)
-            .scaledBy(x: scale, y: scale)
-            .translatedBy(x: -cx, y: -cy)
-        let base = image.transformed(by: centerTrans).cropped(to: extent)
-
-        // ── Step 2: Peripheral Eye 1 (Top Left) ──────────────
-        // Blurry, offset (-6, -12), masked to top-left
-        let p1Offset = CGAffineTransform(translationX: -6, y: -12)
-        let p1Img = image.transformed(by: p1Offset).cropped(to: extent)
+        // We assume main thread rendering because UI updates dictate this.
+        let cache: SpiderLayoutCache.Assets
+        if Thread.isMainThread {
+            cache = SpiderLayoutCache.shared
+        } else {
+            cache = DispatchQueue.main.sync { SpiderLayoutCache.shared }
+        }
         
-        let blur = CIFilter.gaussianBlur()
-        blur.inputImage = p1Img
-        blur.radius = 3.0
-        let p1Blurred = blur.outputImage?.cropped(to: extent) ?? p1Img
+        let scaleX = extent.width / cache.size.width
+        let scaleY = extent.height / cache.size.height
+        let maskTransform = CGAffineTransform(scaleX: scaleX, y: scaleY)
 
-        let opaque = CIColor(red: 0.65, green: 0.65, blue: 0.65) // 65% opacity mask
-        let transp = CIColor(red: 0, green: 0, blue: 0)
+        let compositeSourceOver = CIFilter.sourceOverCompositing()
+        var comp = CIImage(color: .black).cropped(to: extent)
 
-        guard let grad1 = CIFilter(name: "CIRadialGradient") else { return base }
-        let c1 = CIVector(x: extent.minX + extent.width * 0.25, y: extent.maxY - extent.height * 0.25)
-        grad1.setValue(c1, forKey: "inputCenter")
-        grad1.setValue(NSNumber(value: extent.width * 0.1), forKey: "inputRadius0") // bright center
-        grad1.setValue(NSNumber(value: extent.width * 0.6), forKey: "inputRadius1") // fades out
-        grad1.setValue(opaque, forKey: "inputColor0")
-        grad1.setValue(transp, forKey: "inputColor1")
-        guard let mask1 = grad1.outputImage?.cropped(to: extent) else { return base }
+        // Panel contents configured with messy transformations
+        let configs: [(scale: CGFloat, rot: CGFloat, bx: CGFloat, by: CGFloat, blur: Double)] = [
+            (1.00,  0.0,    0,   0, 0.0), // Center: sharp, perfectly sized
+            (0.85,  0.1,  -30,  30, 4.0), // TopRight: blurred, slightly rotated
+            (0.90, -0.15,  20,  50, 5.0), // BottomRight
+            (0.80,  0.05, -40, -40, 3.5), // BottomLeft
+            (0.95, -0.08,  20, -50, 4.5)  // TopLeft
+        ]
 
-        let blend = CIFilter.blendWithMask()
-        blend.inputImage = p1Blurred
-        blend.backgroundImage = base
-        blend.maskImage = mask1
-        let comp1 = blend.outputImage?.cropped(to: extent) ?? base
+        let blendMask = CIFilter.blendWithMask()
+        blendMask.backgroundImage = CIImage(color: .clear).cropped(to: extent)
 
-        // ── Step 3: Peripheral Eye 2 (Bottom Right) ──────────
-        // Blurry, offset (8, 6), masked to bottom-right
-        let p2Offset = CGAffineTransform(translationX: 8, y: 6)
-        let p2Img = image.transformed(by: p2Offset).cropped(to: extent)
+        for (i, config) in configs.enumerated() {
+            guard i < cache.masks.count else { continue }
+            
+            var panel = image
+            if config.blur > 0 {
+                let blur = CIFilter.gaussianBlur()
+                blur.inputImage = panel
+                // Spider blur adjustment
+                blur.radius = Float(config.blur)
+                panel = blur.outputImage?.cropped(to: extent) ?? panel
+                
+                let controls = CIFilter.colorControls()
+                controls.inputImage = panel
+                controls.saturation = 0.8
+                controls.brightness = -0.05
+                panel = controls.outputImage?.cropped(to: extent) ?? panel
+            }
 
-        blur.inputImage = p2Img
-        blur.radius = 4.0
-        let p2Blurred = blur.outputImage?.cropped(to: extent) ?? p2Img
+            let translated = panel.transformed(
+                by: CGAffineTransform(translationX: -cx, y: -cy)
+                    .scaledBy(x: config.scale, y: config.scale)
+                    .rotated(by: config.rot)
+                    .translatedBy(x: cx + config.bx, y: cy + config.by)
+            )
 
-        guard let grad2 = CIFilter(name: "CIRadialGradient") else { return comp1 }
-        let c2 = CIVector(x: extent.maxX - extent.width * 0.25, y: extent.minY + extent.height * 0.25)
-        grad2.setValue(c2, forKey: "inputCenter")
-        grad2.setValue(NSNumber(value: extent.width * 0.1), forKey: "inputRadius0")
-        grad2.setValue(NSNumber(value: extent.width * 0.6), forKey: "inputRadius1")
-        grad2.setValue(opaque, forKey: "inputColor0")
-        grad2.setValue(transp, forKey: "inputColor1")
-        guard let mask2 = grad2.outputImage?.cropped(to: extent) else { return comp1 }
+            let mask = cache.masks[i].transformed(by: maskTransform).cropped(to: extent)
+            blendMask.inputImage = translated.cropped(to: extent)
+            blendMask.maskImage = mask
 
-        blend.inputImage = p2Blurred
-        blend.backgroundImage = comp1
-        blend.maskImage = mask2
-        let comp2 = blend.outputImage?.cropped(to: extent) ?? comp1
+            guard let maskedPanel = blendMask.outputImage?.cropped(to: extent) else {
+                continue
+            }
 
-        // ── Step 4: Colour/Contrast Adjustment ───────────────
-        let controls = CIFilter.colorControls()
-        controls.inputImage = comp2
-        controls.saturation = 0.7  // mute colours slightly
-        controls.contrast = 1.25   // boost contrast
-        return controls.outputImage?.cropped(to: extent) ?? comp2
+            compositeSourceOver.inputImage = maskedPanel
+            compositeSourceOver.backgroundImage = comp
+            comp = compositeSourceOver.outputImage?.cropped(to: extent) ?? comp
+        }
+
+        let gutters = cache.gutters.transformed(by: maskTransform).cropped(to: extent)
+        compositeSourceOver.inputImage = gutters
+        compositeSourceOver.backgroundImage = comp
+        comp = compositeSourceOver.outputImage?.cropped(to: extent) ?? comp
+
+        return comp.cropped(to: extent)
     }
 
     // MARK: - 🔍 Dynamic Focus (radial vignette blur — centre sharp, edges soft)

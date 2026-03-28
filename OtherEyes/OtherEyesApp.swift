@@ -11,7 +11,7 @@ import SwiftUI
 struct OtherEyesApp: App {
     init() {
         // Clear visited animals so the app resets its memory when completely destroyed/restarted
-        UserDefaults.standard.removeObject(forKey: "visitedAnimals_v2")
+        UserDefaults.standard.removeObject(forKey: "visitedAnimals")
     }
 
     var body: some Scene {
