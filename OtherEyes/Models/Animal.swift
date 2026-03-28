@@ -6,7 +6,7 @@
 import Foundation
 
 enum Animal: String, CaseIterable, Identifiable, Hashable {
-    case dog, cat, fly, cockroach, bird, fish, mantisShrimp, rat, eagle, ant, spider
+    case dog, cat, fly, cockroach, bird, eagle, fish, mantisShrimp, ant, spider
 
     var id: String { rawValue }
 
@@ -19,7 +19,6 @@ enum Animal: String, CaseIterable, Identifiable, Hashable {
         case .bird:         return "Bird"
         case .fish:         return "Fish"
         case .mantisShrimp: return "Mantis Shrimp"
-        case .rat:          return "Rat"
         case .eagle:        return "Eagle"
         case .ant:          return "Ant"
         case .spider:       return "Spider"
@@ -35,7 +34,6 @@ enum Animal: String, CaseIterable, Identifiable, Hashable {
         case .bird:         return "🐦"
         case .fish:         return "🐟"
         case .mantisShrimp: return "🦐"
-        case .rat:          return "🐀"
         case .eagle:        return "🦅"
         case .ant:          return "🐜"
         case .spider:       return "🕷️"
@@ -51,10 +49,9 @@ enum Animal: String, CaseIterable, Identifiable, Hashable {
         case .bird:         return "340° wide-angle vision"
         case .fish:         return "Wide-angle underwater"
         case .mantisShrimp: return "12-16 color receptors"
-        case .rat:          return "Blurry, dim, greenish vision"
         case .eagle:        return "Hyper-focuse telescopic"
         case .ant:          return "Macro ground-level vision"
-        case .spider:       return "Fragmented, motion-sensitive"
+        case .spider:       return "Fragmented motion-sensitive"
         }
     }
 
@@ -74,8 +71,6 @@ enum Animal: String, CaseIterable, Identifiable, Hashable {
             return "Some fish can see nearly 360° around them, allowing them to detect movement from almost every direction."
         case .mantisShrimp:
             return "Mantis shrimp have up to 16 types of color receptors, while humans only have 3. They can detect light that we cannot even see."
-        case .rat:
-            return "Rats have very blurry vision, but they can detect even small movements in low light and rely more on their other senses to navigate."
         case .eagle:
             return "Eagles can spot a rabbit from over 3 km away. Their eyes have around 1 million photoreceptors per mm², giving them 4–8× sharper vision than humans."
         case .ant:
@@ -94,7 +89,6 @@ enum Animal: String, CaseIterable, Identifiable, Hashable {
         case .bird:         return ["#F0D8B8", "#FDF5E8"]
         case .fish:         return ["#A8D4E8", "#DCF0F8"]
         case .mantisShrimp: return ["#F0B8E8", "#FDE8F8"]
-        case .rat:          return ["#B8D4B8", "#E0EDD8"]
         case .eagle:        return ["#E8D4A8", "#FDF5DC"]  // warm golden
         case .ant:          return ["#C8A888", "#E8DCC8"]  // earthy brown
         case .spider:       return ["#D8B8E8", "#F5E8FD"]  // muted purple
@@ -111,7 +105,6 @@ enum Animal: String, CaseIterable, Identifiable, Hashable {
         case .bird:         return "Look around — you have almost 360° vision"
         case .fish:         return "Move the phone gently, like drifting underwater"
         case .mantisShrimp: return "Look at colorful objects — you see beyond human colors"
-        case .rat:          return "Move objects in frame — motion is all you see"
         case .eagle:        return "Point at something far away — focus locks on center"
         case .ant:          return "Place your phone near the ground and look around"
         case .spider:       return "Watch moving objects pop out across your fragmented vision"

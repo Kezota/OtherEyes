@@ -2,7 +2,7 @@
 //  MotionAnalyzer.swift
 //  OtherEyes
 //
-//  Lightweight frame-differencing engine for Rat vision.
+//  Lightweight frame-differencing engine for Spider vision.
 //  Compares the current frame to the previous to produce a motion mask
 //  that highlights areas where pixels changed (movement).
 //
@@ -39,27 +39,7 @@ struct MotionAnalyzer: Sendable {
         return blur.outputImage?.cropped(to: extent) ?? mask
     }
 
-    /// Apply the motion mask to the filtered image:
-    /// - Moving areas → full brightness/contrast
-    /// - Static areas → dimmed and desaturated
-    func applyMotionHighlight(image: CIImage, motionMask: CIImage) -> CIImage {
-        let extent = image.extent
 
-        // Create a dimmed version of the image (static areas)
-        let dimmed = CIFilter.colorControls()
-        dimmed.inputImage = image
-        dimmed.saturation = 0.25     // very desaturated
-        dimmed.brightness = -0.12    // darker
-        dimmed.contrast   = 0.80     // low contrast
-        let staticVersion = dimmed.outputImage?.cropped(to: extent) ?? image
-
-        // Blend: where mask is white (motion) → show original; where black (static) → show dimmed
-        let blend = CIFilter.blendWithMask()
-        blend.inputImage = image              // motion areas (bright)
-        blend.backgroundImage = staticVersion  // static areas (dim)
-        blend.maskImage = motionMask
-        return blend.outputImage?.cropped(to: extent) ?? image
-    }
 
     /// Apply the motion mask for Spider vision:
     /// - Moving areas → heavily brightened and high contrast

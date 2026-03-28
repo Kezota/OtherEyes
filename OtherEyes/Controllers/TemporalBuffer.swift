@@ -2,8 +2,7 @@
 //  TemporalBuffer.swift
 //  OtherEyes
 //
-//  Ring buffer that stores the last N processed CIImage frames.
-//  Used by Fly (ghosting) and Rat (motion detection).
+//  Used by Fly (ghosting).
 //
 
 import CoreImage

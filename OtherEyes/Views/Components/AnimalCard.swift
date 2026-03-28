@@ -9,7 +9,7 @@ struct AnimalCard: View {
     let animal: Animal
 
     var body: some View {
-        VStack(spacing: 6) {
+        VStack(spacing: 5) {
             Text(animal.emoji)
                 .font(.system(size: 44))
 
@@ -25,7 +25,7 @@ struct AnimalCard: View {
                 .minimumScaleFactor(0.8)
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 16)
+        .padding(.vertical, 13)
         .padding(.horizontal, 10)
         .background {
             RoundedRectangle(cornerRadius: 22, style: .continuous)

@@ -357,11 +357,7 @@ fileprivate final class FrameProcessor: @unchecked Sendable {
             }
         }
 
-        // 🐀 Rat: motion detection — highlight movement, dim static
-        if animal == .rat, let prevRaw = previousRawFrame {
-            let mask = motionAnalyzer.motionMask(current: ciImage, previous: prevRaw)
-            filteredCI = motionAnalyzer.applyMotionHighlight(image: filteredCI, motionMask: mask)
-        }
+
 
         // 🕷️ Spider: motion detection — heavily brighten and contrast moving areas
         if animal == .spider, let prevRaw = previousRawFrame {
@@ -393,7 +389,7 @@ fileprivate final class FrameProcessor: @unchecked Sendable {
             }
         }
 
-        // Store raw frame for rat & spider motion detection
+        // Store raw frame for spider motion detection
         previousRawFrame = ciImage
 
         update(rawImg, filteredImg)
