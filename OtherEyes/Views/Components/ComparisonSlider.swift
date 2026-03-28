@@ -100,7 +100,7 @@ struct ComparisonSlider: View {
                 DragGesture(minimumDistance: 0)
                     .updating($isDragging) { _, state, _ in state = true }
                     .onChanged { g in
-                        let newValue = (g.location.x / trackW).clamped(to: 0...1)
+                        let newValue = min(max(g.location.x / trackW, 0), 1)
                         value = newValue
 
                         // Haptic on every 10% step
@@ -116,12 +116,6 @@ struct ComparisonSlider: View {
         .onAppear {
             feedbackGenerator.prepare()
         }
-    }
-}
-
-extension Comparable {
-    func clamped(to range: ClosedRange<Self>) -> Self {
-        min(max(self, range.lowerBound), range.upperBound)
     }
 }
 

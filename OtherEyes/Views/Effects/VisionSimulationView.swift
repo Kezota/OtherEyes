@@ -12,19 +12,14 @@ struct VisionSimulationView: View {
     @State private var selectedAnimal: Animal
     @State private var showInsight = false
     @State private var sliderValue: Double = 0.5  // 0 = animal, 1 = human
+    @State private var showImmersionTip = false
+    @State private var immersionTipId = UUID()
     @Environment(\.dismiss) private var dismiss
 
-    // Fun Fact nudge tooltip
-    @State private var showFunFactNudge = false
-    @State private var nudgePulse = false
-    @State private var insightPulse = false
-
     // Track which animals the user has already seen insight for
-    @AppStorage("visitedAnimals") private var visitedAnimalsRaw: String = ""
-
-    // Immersion tip toast
-    @State private var showImmersionTip = false
-    @State private var immersionTipId: UUID = UUID()  // forces re-animation on animal change
+    @AppStorage("visitedAnimals_v2") private var visitedAnimalsRaw: String = ""
+    @State private var pendingAutoInsightAnimal: Animal? = nil
+    @State private var pendingImmersionTipForAnimal: Animal? = nil
 
     init(initialAnimal: Animal) {
         self.initialAnimal = initialAnimal
@@ -48,29 +43,6 @@ struct VisionSimulationView: View {
                 topBar
                 Spacer()
                 bottomArea
-            }
-
-            // Fun fact nudge tooltip (auto-shows then fades)
-            if showFunFactNudge && !showInsight {
-                VStack {
-                    HStack {
-                        Spacer()
-                        FunFactNudge(onTap: {
-                            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                                showFunFactNudge = false
-                                showInsight = true
-                            }
-                        })
-                        .padding(.trailing, 16)
-                        .padding(.top, 72)
-                    }
-                    Spacer()
-                }
-                .transition(.asymmetric(
-                    insertion: .move(edge: .top).combined(with: .opacity),
-                    removal: .opacity
-                ))
-                .zIndex(5)
             }
 
             // Insight popup overlay
@@ -97,19 +69,7 @@ struct VisionSimulationView: View {
         .onAppear {
             cameraManager.selectedAnimal = selectedAnimal
             cameraManager.startSession()
-            // Auto-show insight for the first visit
-            if !visitedAnimals.contains(selectedAnimal.rawValue) {
-                markVisited(selectedAnimal)
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                        showInsight = true
-                    }
-                }
-            } else {
-                scheduleNudge()
-            }
-            // Show immersion tip
-            showImmersionTip(for: selectedAnimal)
+            handleAnimalVisit(for: selectedAnimal)
         }
         .onDisappear {
             cameraManager.stopSession()
@@ -118,38 +78,14 @@ struct VisionSimulationView: View {
             withAnimation(.easeInOut(duration: 0.35)) {
                 cameraManager.selectedAnimal = newAnimal
             }
-            // Auto-show insight for unvisited animals
-            showFunFactNudge = false
-            if !visitedAnimals.contains(newAnimal.rawValue) {
-                markVisited(newAnimal)
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
-                    guard !showInsight else { return }
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                        showInsight = true
-                    }
-                }
-            } else {
-                scheduleNudge()
-            }
-            // Show immersion tip for new animal
-            showImmersionTip(for: newAnimal)
+            handleAnimalVisit(for: newAnimal)
         }
-        .onChange(of: showInsight) { _, open in
-            if !open { scheduleNudge(delay: 20) }   // nudge again after closing
-        }
-    }
-
-    // MARK: - Nudge Scheduling
-    private func scheduleNudge(delay: TimeInterval = 5) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-            guard !showInsight else { return }
-            withAnimation(.spring(response: 0.5, dampingFraction: 0.75)) {
-                showFunFactNudge = true
-            }
-            // Auto-hide nudge after 8 s if not tapped
-            DispatchQueue.main.asyncAfter(deadline: .now() + 8) {
-                withAnimation(.easeOut(duration: 0.4)) {
-                    showFunFactNudge = false
+        .onChange(of: showInsight) { _, isShowing in
+            if !isShowing {
+                // When insight popup is dismissed, check if we have a pending immersion tip to show
+                if let pendingAnimal = pendingImmersionTipForAnimal, pendingAnimal == selectedAnimal {
+                    presentImmersionTip(for: pendingAnimal)
+                    pendingImmersionTipForAnimal = nil
                 }
             }
         }
@@ -166,18 +102,41 @@ struct VisionSimulationView: View {
         visitedAnimalsRaw = set.joined(separator: ",")
     }
 
+    private func handleAnimalVisit(for animal: Animal) {
+        if !visitedAnimals.contains(animal.rawValue) {
+            // First visit: Sequence insight popup, then immersion tip
+            pendingImmersionTipForAnimal = animal
+            pendingAutoInsightAnimal = animal
+            
+            // Pop insight after a short delay so view transitions finish
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                guard pendingAutoInsightAnimal == animal else { return }
+                guard !showInsight else { return }
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                    showInsight = true
+                }
+                markVisited(animal)
+            }
+        } else {
+            // Revisit: show only the immersion tip immediately
+            pendingImmersionTipForAnimal = nil
+            pendingAutoInsightAnimal = nil
+            presentImmersionTip(for: animal)
+        }
+    }
+
     // MARK: - Immersion Tip Toast
-    private func showImmersionTip(for animal: Animal) {
+    private func presentImmersionTip(for animal: Animal) {
         // Reset with new ID to force re-animation if already showing
         immersionTipId = UUID()
-        withAnimation(.easeOut(duration: 0.35)) {
+        withAnimation(.spring(response: 0.7, dampingFraction: 0.75)) {
             showImmersionTip = true
         }
-        // Auto-hide after 4 seconds
+        // Auto-hide after 7 seconds for easier reading
         let currentId = immersionTipId
-        DispatchQueue.main.asyncAfter(deadline: .now() + 4.0) { [self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + 7.0) { [self] in
             guard immersionTipId == currentId else { return }  // stale
-            withAnimation(.easeOut(duration: 0.5)) {
+            withAnimation(.easeOut(duration: 0.6)) {
                 showImmersionTip = false
             }
         }
@@ -289,73 +248,31 @@ struct VisionSimulationView: View {
 
             Spacer()
 
-            // Insight button — prominent with label, glow & pulse
+            // Insight button — matches top bar capsule style
             Button(action: {
+                pendingAutoInsightAnimal = nil
+                if !visitedAnimals.contains(selectedAnimal.rawValue) {
+                    markVisited(selectedAnimal)
+                }
                 withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                    showFunFactNudge = false
                     showInsight = true
                 }
             }) {
-                ZStack {
-                    // Pulse ring 1 (slow)
-                    Capsule()
-                        .stroke(Color(red: 0.75, green: 0.55, blue: 1.0).opacity(insightPulse ? 0.0 : 0.5), lineWidth: 2)
-                        .scaleEffect(insightPulse ? 1.45 : 1.0)
-                        .animation(
-                            .easeOut(duration: 1.6).repeatForever(autoreverses: false),
-                            value: insightPulse
-                        )
-                        .frame(width: 100, height: 40)
-
-                    // Pulse ring 2 (staggered)
-                    Capsule()
-                        .stroke(Color(red: 0.85, green: 0.65, blue: 1.0).opacity(insightPulse ? 0.0 : 0.35), lineWidth: 1.5)
-                        .scaleEffect(insightPulse ? 1.7 : 1.0)
-                        .animation(
-                            .easeOut(duration: 2.0).repeatForever(autoreverses: false),
-                            value: insightPulse
-                        )
-                        .frame(width: 100, height: 40)
-
-                    // Button content
-                    HStack(spacing: 6) {
-                        Text("💡")
-                            .font(.system(size: 18))
-                        Text("Insight")
-                            .font(.system(size: 14, weight: .bold, design: .rounded))
-                            .foregroundStyle(.white)
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 9)
-                    .background {
-                        Capsule()
-                            .fill(
-                                LinearGradient(
-                                    colors: [
-                                        Color(red: 0.50, green: 0.25, blue: 0.95),
-                                        Color(red: 0.70, green: 0.35, blue: 1.0)
-                                    ],
-                                    startPoint: .leading,
-                                    endPoint: .trailing
-                                )
-                            )
-                            .overlay {
-                                Capsule()
-                                    .stroke(.white.opacity(0.35), lineWidth: 1)
-                            }
-                            .shadow(color: Color(red: 0.55, green: 0.30, blue: 1.0).opacity(0.7), radius: 16, x: 0, y: 2)
-                            .shadow(color: Color(red: 0.65, green: 0.40, blue: 1.0).opacity(0.4), radius: 6, x: 0, y: 0)
-                    }
-                    .scaleEffect(insightPulse ? 1.04 : 1.0)
-                    .animation(
-                        .easeInOut(duration: 1.2).repeatForever(autoreverses: true),
-                        value: insightPulse
-                    )
+                HStack(spacing: 6) {
+                    Text("💡")
+                        .font(.system(size: 16))
+                
                 }
-            }
-            .onAppear {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                    insightPulse = true
+                .padding(.horizontal, 14)
+                .padding(.vertical, 9)
+                .background {
+                    Capsule()
+                        .fill(.ultraThinMaterial)
+                        .overlay {
+                            Capsule()
+                                .stroke(.white.opacity(0.4), lineWidth: 1)
+                        }
+                        .shadow(color: .black.opacity(0.2), radius: 8, x: 0, y: 2)
                 }
             }
         }
@@ -379,57 +296,6 @@ struct VisionSimulationView: View {
             AnimalSwitcherBar(selectedAnimal: $selectedAnimal)
                 .padding(.bottom, 8)
         }
-    }
-}
-
-// MARK: - Fun Fact Nudge Tooltip
-struct FunFactNudge: View {
-    let onTap: () -> Void
-
-    @State private var bounce = false
-
-    var body: some View {
-        Button(action: onTap) {
-            HStack(spacing: 8) {
-                Text("💡")
-                    .font(.system(size: 16))
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("Animal Fun Fact")
-                        .font(.system(size: 12, weight: .bold, design: .rounded))
-                        .foregroundStyle(.white)
-                    Text("Tap to discover!")
-                        .font(.system(size: 10, weight: .medium, design: .rounded))
-                        .foregroundStyle(.white.opacity(0.65))
-                }
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(.white.opacity(0.5))
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .background {
-                Capsule()
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                Color(red: 0.35, green: 0.20, blue: 0.75),
-                                Color(red: 0.55, green: 0.25, blue: 0.90)
-                            ],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
-                    )
-                    .overlay {
-                        Capsule()
-                            .stroke(.white.opacity(0.25), lineWidth: 1)
-                    }
-                    .shadow(color: Color(red: 0.45, green: 0.20, blue: 0.85).opacity(0.6), radius: 14, x: 0, y: 4)
-            }
-        }
-        .buttonStyle(.plain)
-        .offset(y: bounce ? -3 : 0)
-        .animation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true), value: bounce)
-        .onAppear { bounce = true }
     }
 }
 
@@ -460,5 +326,11 @@ struct ImmersionTipToast: View {
                 .shadow(color: .black.opacity(0.3), radius: 12, x: 0, y: 4)
         }
         .padding(.horizontal, 24)
+    }
+}
+
+extension Comparable {
+    func clamped(to range: ClosedRange<Self>) -> Self {
+        min(max(self, range.lowerBound), range.upperBound)
     }
 }

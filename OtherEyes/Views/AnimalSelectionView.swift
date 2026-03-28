@@ -4,6 +4,7 @@
 //
 
 import SwiftUI
+import AVFoundation
 
 // MARK: - Press animation handled entirely by ButtonStyle (never blocks navigation)
 struct GlassCardButtonStyle: ButtonStyle {
@@ -17,6 +18,7 @@ struct GlassCardButtonStyle: ButtonStyle {
 struct AnimalSelectionView: View {
 
     @State private var path = NavigationPath()
+    @State private var cameraStatus: AVAuthorizationStatus = AVCaptureDevice.authorizationStatus(for: .video)
 
     private let columns = [
         GridItem(.flexible(), spacing: 10),
@@ -103,7 +105,54 @@ struct AnimalSelectionView: View {
                 VisionSimulationView(initialAnimal: animal)
             }
             .navigationBarHidden(true)
+            .onAppear {
+                checkCameraStatus()
+            }
+            
+            // ── Explicit Camera Consent Overlay ──────────────────────────
+            if cameraStatus == .notDetermined {
+                Color.black.opacity(0.85).ignoresSafeArea()
+                
+                VStack(spacing: 24) {
+                    Image(systemName: "camera.viewfinder")
+                        .font(.system(size: 64))
+                        .foregroundStyle(.white)
+                    
+                    VStack(spacing: 8) {
+                        Text("Camera Access Required")
+                            .font(.system(size: 24, weight: .bold, design: .rounded))
+                            .foregroundStyle(.white)
+                        
+                        Text("OtherEyes needs your camera to let you experience the world through different animal perspectives.")
+                            .font(.system(size: 16, weight: .medium, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.8))
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 32)
+                    }
+                    
+                    Button {
+                        AVCaptureDevice.requestAccess(for: .video) { _ in
+                            DispatchQueue.main.async {
+                                checkCameraStatus()
+                            }
+                        }
+                    } label: {
+                        Text("Allow Camera")
+                            .font(.system(size: 18, weight: .semibold, design: .rounded))
+                            .foregroundStyle(.black)
+                            .frame(width: 220, height: 50)
+                            .background(Color.white, in: Capsule())
+                    }
+                    .padding(.top, 16)
+                }
+                .zIndex(100)
+                .transition(.opacity)
+            }
         }
+    }
+
+    private func checkCameraStatus() {
+        cameraStatus = AVCaptureDevice.authorizationStatus(for: .video)
     }
 }
 
