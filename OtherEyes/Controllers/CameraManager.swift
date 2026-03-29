@@ -357,8 +357,6 @@ fileprivate final class FrameProcessor: @unchecked Sendable {
             }
         }
 
-
-
         // 🕷️ Spider: motion detection — heavily brighten and contrast moving areas
         if animal == .spider, let prevRaw = previousRawFrame {
             let mask = motionAnalyzer.motionMask(current: ciImage, previous: prevRaw)

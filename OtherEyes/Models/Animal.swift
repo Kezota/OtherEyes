@@ -89,9 +89,9 @@ enum Animal: String, CaseIterable, Identifiable, Hashable {
         case .bird:         return ["#F0D8B8", "#FDF5E8"]
         case .fish:         return ["#A8D4E8", "#DCF0F8"]
         case .mantisShrimp: return ["#F0B8E8", "#FDE8F8"]
-        case .eagle:        return ["#E8D4A8", "#FDF5DC"]  // warm golden
-        case .ant:          return ["#C8A888", "#E8DCC8"]  // earthy brown
-        case .spider:       return ["#D8B8E8", "#F5E8FD"]  // muted purple
+        case .eagle:        return ["#E8D4A8", "#FDF5DC"]
+        case .ant:          return ["#C8A888", "#E8DCC8"]
+        case .spider:       return ["#D8B8E8", "#F5E8FD"]
         }
     }
 
