@@ -10,13 +10,15 @@ struct InsightPopup: View {
     @Binding var isShowing: Bool
 
     @State private var dragOffset: CGFloat = 0
-    @State private var opacity: Double = 0
+    @State private var backdropOpacity: Double = 0   // backdrop fades independently
+    @State private var cardOpacity: Double = 0
     @State private var yOffset: CGFloat = 60
+    @State private var popupScale: CGFloat = 0.92
 
     var body: some View {
         ZStack {
-            // Dimmed backdrop — tap to dismiss
-            Color.black.opacity(0.45)
+            // Dimmed backdrop — fades in independently (no slide)
+            Color.black.opacity(0.45 * backdropOpacity)
                 .ignoresSafeArea()
                 .onTapGesture { dismiss() }
 
@@ -67,13 +69,13 @@ struct InsightPopup: View {
                         Spacer()
 
                         // Close button
-                        Button(action: dismiss) {
-                            Image(systemName: "xmark")
-                                .font(.system(size: 13, weight: .bold))
-                                .foregroundStyle(.white.opacity(0.6))
-                                .frame(width: 30, height: 30)
-                                .background(Color.white.opacity(0.12), in: Circle())
-                        }
+//                        Button(action: dismiss) {
+//                            Image(systemName: "xmark")
+//                                .font(.system(size: 13, weight: .bold))
+//                                .foregroundStyle(.white.opacity(0.6))
+//                                .frame(width: 30, height: 30)
+//                                .background(Color.white.opacity(0.12), in: Circle())
+//                        }
                     }
                     .padding(.horizontal, 20)
                     .padding(.bottom, 18)
@@ -109,16 +111,17 @@ struct InsightPopup: View {
                 }
                 .background {
                     ZStack {
-                        // Deep dark glass
+                        // Deep dark glass with material blur
                         RoundedRectangle(cornerRadius: 32, style: .continuous)
-                            .fill(.ultraThinMaterial.opacity(0.01))
+                            .fill(.ultraThinMaterial)
+                            .opacity(0.85)
                             .background(
                                 RoundedRectangle(cornerRadius: 32, style: .continuous)
                                     .fill(
                                         LinearGradient(
                                             colors: [
-                                                Color(red: 0.10, green: 0.08, blue: 0.20),
-                                                Color(red: 0.06, green: 0.04, blue: 0.14)
+                                                Color(red: 0.10, green: 0.08, blue: 0.20).opacity(0.92),
+                                                Color(red: 0.06, green: 0.04, blue: 0.14).opacity(0.95)
                                             ],
                                             startPoint: .topLeading,
                                             endPoint: .bottomTrailing
@@ -129,17 +132,20 @@ struct InsightPopup: View {
                         RoundedRectangle(cornerRadius: 32, style: .continuous)
                             .stroke(
                                 LinearGradient(
-                                    colors: [.white.opacity(0.28), .white.opacity(0.05)],
+                                    colors: [.white.opacity(0.35), .white.opacity(0.06)],
                                     startPoint: .topLeading,
                                     endPoint: .bottomTrailing
                                 ),
                                 lineWidth: 1
                             )
                     }
-                    .shadow(color: .black.opacity(0.4), radius: 32, x: 0, y: 12)
+                    .shadow(color: .black.opacity(0.5), radius: 36, x: 0, y: 14)
+                    .shadow(color: Color(red: 0.3, green: 0.2, blue: 0.6).opacity(0.15), radius: 20, x: 0, y: 4)
                 }
                 .padding(.horizontal, 16)
-                .offset(y: dragOffset)
+                .offset(y: dragOffset + yOffset)
+                .scaleEffect(popupScale)
+                .opacity(cardOpacity)
                 .gesture(
                     DragGesture()
                         .onChanged { value in
@@ -161,20 +167,26 @@ struct InsightPopup: View {
                 Spacer().frame(height: 32)
             }
         }
-        .opacity(opacity)
-        .offset(y: yOffset)
         .onAppear {
+            // Backdrop fades in quickly
+            withAnimation(.easeOut(duration: 0.25)) {
+                backdropOpacity = 1
+            }
+            // Card slides up + scales in
             withAnimation(.spring(response: 0.45, dampingFraction: 0.78)) {
-                opacity = 1
+                cardOpacity = 1
                 yOffset = 0
+                popupScale = 1.0
             }
         }
     }
 
     private func dismiss() {
         withAnimation(.easeOut(duration: 0.22)) {
-            opacity = 0
+            backdropOpacity = 0
+            cardOpacity = 0
             yOffset = 60
+            popupScale = 0.92
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) {
             isShowing = false

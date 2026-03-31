@@ -7,6 +7,8 @@ import SwiftUI
 
 struct AnimalSwitcherBar: View {
     @Binding var selectedAnimal: Animal
+    @Namespace private var switcherNamespace
+    private let haptic = UIImpactFeedbackGenerator(style: .light)
     
     var body: some View {
         HStack(spacing: 0) {
@@ -16,8 +18,10 @@ struct AnimalSwitcherBar: View {
                         AnimalSwitcherButton(
                             animal: animal,
                             isSelected: selectedAnimal == animal,
+                            namespace: switcherNamespace,
                             onTap: {
-                                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                                haptic.impactOccurred()
+                                withAnimation(.spring(response: 0.35, dampingFraction: 0.72)) {
                                     selectedAnimal = animal
                                 }
                             }
@@ -25,24 +29,37 @@ struct AnimalSwitcherBar: View {
                     }
                 }
                 .padding(.horizontal, 16)
-                .padding(.vertical, 12)
+                .padding(.vertical, 10)
             }
         }
         .background {
             RoundedRectangle(cornerRadius: 28, style: .continuous)
                 .fill(.ultraThinMaterial)
                 .overlay {
+                    // Inner glow highlight
+                    RoundedRectangle(cornerRadius: 28, style: .continuous)
+                        .fill(
+                            RadialGradient(
+                                colors: [.white.opacity(0.06), .clear],
+                                center: .top,
+                                startRadius: 0,
+                                endRadius: 120
+                            )
+                        )
+                }
+                .overlay {
                     RoundedRectangle(cornerRadius: 28, style: .continuous)
                         .stroke(
                             LinearGradient(
-                                colors: [.white.opacity(0.8), .white.opacity(0.3)],
+                                colors: [.white.opacity(0.7), .white.opacity(0.2)],
                                 startPoint: .top,
                                 endPoint: .bottom
                             ),
                             lineWidth: 1
                         )
                 }
-                .shadow(color: .black.opacity(0.10), radius: 16, x: 0, y: -4)
+                .shadow(color: .black.opacity(0.15), radius: 20, x: 0, y: -4)
+                .shadow(color: .black.opacity(0.08), radius: 6, x: 0, y: -2)
         }
         .padding(.horizontal, 16)
     }
@@ -51,6 +68,7 @@ struct AnimalSwitcherBar: View {
 struct AnimalSwitcherButton: View {
     let animal: Animal
     let isSelected: Bool
+    var namespace: Namespace.ID
     let onTap: () -> Void
     
     var body: some View {
@@ -86,6 +104,7 @@ struct AnimalSwitcherButton: View {
                             RoundedRectangle(cornerRadius: 16, style: .continuous)
                                 .stroke(.white.opacity(0.6), lineWidth: 1)
                         }
+                        .matchedGeometryEffect(id: "selection", in: namespace)
                         .transition(.scale.combined(with: .opacity))
                 }
             }
