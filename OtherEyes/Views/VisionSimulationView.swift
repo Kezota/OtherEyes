@@ -21,6 +21,12 @@ struct VisionSimulationView: View {
     @State private var pendingAutoInsightAnimal: Animal? = nil
     @State private var pendingImmersionTipForAnimal: Animal? = nil
 
+    // NEW: Shutter flash
+    @State private var shutterFlash: Bool = false
+
+    // NEW: Animal dropdown
+    @State private var showAnimalPicker = false
+
     init(initialAnimal: Animal) {
         self.initialAnimal = initialAnimal
         _selectedAnimal = State(initialValue: initialAnimal)
@@ -62,6 +68,56 @@ struct VisionSimulationView: View {
                 }
                 .transition(.opacity.combined(with: .move(edge: .top)))
                 .zIndex(4)
+            }
+
+            // NEW: Shutter flash overlay
+            if shutterFlash {
+                Color.white
+                    .ignoresSafeArea()
+                    .allowsHitTesting(false)
+                    .transition(.opacity)
+                    .zIndex(15)
+            }
+
+            // NEW: Photo preview overlay
+            if let captured = cameraManager.capturedPhoto {
+                PhotoPreviewView(
+                    image: captured,
+                    animal: selectedAnimal,
+                    onDismiss: {
+                        withAnimation(.easeOut(duration: 0.25)) {
+                            cameraManager.capturedPhoto = nil
+                        }
+                    }
+                )
+                .zIndex(20)
+                .transition(.opacity)
+            }
+
+            // NEW: Animal picker dropdown overlay (high zIndex, fixed position)
+            if showAnimalPicker {
+                // Tap-outside-to-dismiss background
+                Color.black.opacity(0.01)
+                    .ignoresSafeArea()
+                    .onTapGesture {
+                        withAnimation(.easeOut(duration: 0.2)) {
+                            showAnimalPicker = false
+                        }
+                    }
+                    .zIndex(29)
+
+                // Dropdown panel anchored to bottom-left
+                VStack {
+                    Spacer()
+                    HStack {
+                        animalDropdown
+                            .padding(.leading, 28)
+                            .padding(.bottom, 100)
+                        Spacer()
+                    }
+                }
+                .transition(.scale(scale: 0.85, anchor: .bottomLeading).combined(with: .opacity))
+                .zIndex(30)
             }
         }
         .ignoresSafeArea(edges: .bottom)
@@ -282,7 +338,8 @@ struct VisionSimulationView: View {
 
     // MARK: - Bottom Area
     private var bottomArea: some View {
-        VStack(spacing: 6) {
+        VStack(spacing: 12) {
+            // Comparison slider
             HStack(spacing: 8) {
                 Text("👁")
                     .font(.system(size: 14))
@@ -291,11 +348,166 @@ struct VisionSimulationView: View {
                     .font(.system(size: 14))
             }
             .padding(.horizontal, 20)
-            .padding(.top, 4)
 
-            AnimalSwitcherBar(selectedAnimal: $selectedAnimal)
-                .padding(.bottom, 8)
+            // Bottom control bar: [animal picker]  [capture]  [camera flip]
+            ZStack {
+                HStack {
+                    // Left: Animal emoji picker
+                    animalPickerButton
+                    Spacer()
+                    // Right: Camera switch
+                    cameraFlipButton
+                }
+
+                // Center: Capture button
+                captureButton
+            }
+            .padding(.horizontal, 28)
+            .padding(.bottom, 16)
         }
+    }
+
+    // MARK: - Animal Picker Button
+    private var animalPickerButton: some View {
+        Button(action: {
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) {
+                showAnimalPicker.toggle()
+            }
+        }) {
+            ZStack {
+                Circle()
+                    .fill(.ultraThinMaterial)
+                    .overlay {
+                        Circle()
+                            .stroke(.white.opacity(0.4), lineWidth: 1)
+                    }
+                    .shadow(color: .black.opacity(0.25), radius: 8, x: 0, y: 2)
+                    .frame(width: 50, height: 50)
+
+                Text(selectedAnimal.emoji)
+                    .font(.system(size: 24))
+            }
+        }
+    }
+
+    // MARK: - Animal Dropdown
+    private var animalDropdown: some View {
+        ScrollView(.vertical, showsIndicators: false) {
+            VStack(spacing: 2) {
+                ForEach(Animal.allCases) { animal in
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.25)) {
+                            selectedAnimal = animal
+                            showAnimalPicker = false
+                        }
+                    } label: {
+                        HStack(spacing: 10) {
+                            Text(animal.emoji)
+                                .font(.system(size: 22))
+                            Text(animal.name)
+                                .font(.system(size: 14, weight: .medium, design: .rounded))
+                                .foregroundStyle(.white)
+                            Spacer()
+                            if animal == selectedAnimal {
+                                Image(systemName: "checkmark")
+                                    .font(.system(size: 11, weight: .bold))
+                                    .foregroundStyle(.white.opacity(0.7))
+                            }
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .background(
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .fill(animal == selectedAnimal
+                                      ? Color.white.opacity(0.12)
+                                      : Color.clear)
+                        )
+                    }
+                    .buttonStyle(AnimalRowButtonStyle())
+                }
+            }
+            .padding(.vertical, 8)
+        }
+        .frame(width: 185, height: 320)
+        .background {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(.ultraThinMaterial)
+                .background(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    Color(red: 0.12, green: 0.10, blue: 0.22).opacity(0.92),
+                                    Color(red: 0.08, green: 0.06, blue: 0.16).opacity(0.95)
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                )
+                .overlay {
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .stroke(.white.opacity(0.25), lineWidth: 1)
+                }
+                .shadow(color: .black.opacity(0.5), radius: 24, x: 0, y: 10)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    // MARK: - Camera Flip Button
+    private var cameraFlipButton: some View {
+        Button(action: {
+            cameraManager.switchCamera()
+        }) {
+            ZStack {
+                Circle()
+                    .fill(.ultraThinMaterial)
+                    .overlay {
+                        Circle()
+                            .stroke(.white.opacity(0.4), lineWidth: 1)
+                    }
+                    .shadow(color: .black.opacity(0.25), radius: 8, x: 0, y: 2)
+                    .frame(width: 50, height: 50)
+
+                Image(systemName: "camera.rotate")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(.white)
+            }
+        }
+        .buttonStyle(CameraFlipButtonStyle())
+    }
+
+    // MARK: - Capture Button
+    private var captureButton: some View {
+        Button(action: {
+            triggerCapture()
+        }) {
+            ZStack {
+                Circle()
+                    .stroke(.white.opacity(0.9), lineWidth: 4)
+                    .frame(width: 72, height: 72)
+                    .shadow(color: .black.opacity(0.3), radius: 6, x: 0, y: 2)
+
+                Circle()
+                    .fill(.white)
+                    .frame(width: 58, height: 58)
+                    .shadow(color: .white.opacity(0.3), radius: 8, x: 0, y: 0)
+            }
+        }
+        .buttonStyle(ShutterButtonStyle())
+    }
+
+    // MARK: - Capture Logic
+    private func triggerCapture() {
+        withAnimation(.easeIn(duration: 0.08)) {
+            shutterFlash = true
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+            withAnimation(.easeOut(duration: 0.25)) {
+                shutterFlash = false
+            }
+        }
+        cameraManager.capturePhoto()
     }
 }
 
@@ -326,6 +538,41 @@ struct ImmersionTipToast: View {
                 .shadow(color: .black.opacity(0.3), radius: 12, x: 0, y: 4)
         }
         .padding(.horizontal, 24)
+    }
+}
+
+// MARK: - Shutter Button Style
+struct ShutterButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.85 : 1.0)
+            .opacity(configuration.isPressed ? 0.8 : 1.0)
+            .animation(.spring(response: 0.2, dampingFraction: 0.6), value: configuration.isPressed)
+    }
+}
+
+// MARK: - Camera Flip Button Style
+struct CameraFlipButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.88 : 1.0)
+            .opacity(configuration.isPressed ? 0.7 : 1.0)
+            .animation(.spring(response: 0.2, dampingFraction: 0.65), value: configuration.isPressed)
+    }
+}
+
+// MARK: - Animal Row Button Style (press highlight for dropdown items)
+struct AnimalRowButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(configuration.isPressed ? Color.white.opacity(0.15) : Color.clear)
+                    .padding(.horizontal, 6)
+            )
+            .padding(.horizontal, 6)
+            .scaleEffect(configuration.isPressed ? 0.96 : 1.0)
+            .animation(.easeOut(duration: 0.15), value: configuration.isPressed)
     }
 }
 

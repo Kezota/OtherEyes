@@ -9,12 +9,23 @@ import CoreImage
 import UIKit
 import SwiftUI
 import os
+import AVFAudio
 
 // Thread-safe box to share selectedAnimal across actor boundaries
 fileprivate final class AtomicAnimal: @unchecked Sendable {
     private let lock = OSAllocatedUnfairLock(initialState: Animal.dog)
     
     var value: Animal {
+        get { lock.withLock { $0 } }
+        set { lock.withLock { $0 = newValue } }
+    }
+}
+
+// Thread-safe bool to share isFrontCamera with the frame processor
+fileprivate final class AtomicBool: @unchecked Sendable {
+    private let lock = OSAllocatedUnfairLock(initialState: false)
+    
+    var value: Bool {
         get { lock.withLock { $0 } }
         set { lock.withLock { $0 = newValue } }
     }
@@ -41,6 +52,7 @@ class CameraManager: NSObject, ObservableObject {
 
     // Shared between main and background delegate — protected by AtomicAnimal
     private let atomicAnimal = AtomicAnimal()
+    private let atomicFrontCamera = AtomicBool()
 
     private let filterProcessor = AnimalFilterProcessor()
     private let ciContext = CIContext(options: [.useSoftwareRenderer: false])
@@ -64,6 +76,16 @@ class CameraManager: NSObject, ObservableObject {
     @Published var filteredImage: UIImage?
     @Published var rawImage: UIImage?
     @Published var isAuthorized: Bool = false
+
+    // Camera switch state
+    @Published var isFrontCamera: Bool = false
+
+    // Photo capture state
+    @Published var capturedPhoto: UIImage? = nil
+    @Published var isFreezeFrame: Bool = false
+
+    // Shutter sound
+    private var shutterPlayer: AVAudioPlayer?
     
     @Published var selectedAnimal: Animal = .dog {
         didSet {
@@ -77,14 +99,16 @@ class CameraManager: NSObject, ObservableObject {
                 resetProcessingState()
             }
 
-            // Switch camera lens if the animal requires a different one
-            let needsUltraWide = selectedAnimal.prefersUltraWide
-            if needsUltraWide != currentLensIsUltraWide {
-                switchCameraLens(useUltraWide: needsUltraWide)
+            // Switch camera lens if the animal requires a different one (back camera only)
+            if !isFrontCamera {
+                let needsUltraWide = selectedAnimal.prefersUltraWide
+                if needsUltraWide != currentLensIsUltraWide {
+                    switchCameraLens(useUltraWide: needsUltraWide)
+                }
             }
 
-            // 🐱 Cat night-vision: turn torch on at low intensity
-            setTorch(on: selectedAnimal == .cat)
+            // 🐱 Cat night-vision: turn torch on at low intensity (back camera only)
+            setTorch(on: selectedAnimal == .cat && !isFrontCamera)
         }
     }
     
@@ -117,7 +141,8 @@ class CameraManager: NSObject, ObservableObject {
             self.session.beginConfiguration()
             self.session.sessionPreset = .high
             
-            let device = self.bestCamera(ultraWide: useUltraWide)
+            let position: AVCaptureDevice.Position = self.isFrontCamera ? .front : .back
+            let device = self.bestCamera(ultraWide: useUltraWide, position: position)
             guard let device,
                   let input = try? AVCaptureDeviceInput(device: device),
                   self.session.canAddInput(input) else {
@@ -130,6 +155,7 @@ class CameraManager: NSObject, ObservableObject {
             let processor = FrameProcessor(filterProcessor: self.filterProcessor,
                                            ciContext: self.ciContext,
                                            atomicAnimal: self.atomicAnimal,
+                                           atomicFrontCamera: self.atomicFrontCamera,
                                            transitionManager: self.transitionManager,
                                            ambientEngine: self.ambientEngine,
                                            temporalBuffer: self.temporalBuffer,
@@ -162,29 +188,106 @@ class CameraManager: NSObject, ObservableObject {
     private func switchCameraLens(useUltraWide: Bool) {
         sessionQueue.async { [weak self] in
             guard let self else { return }
-            let device = self.bestCamera(ultraWide: useUltraWide)
+            let position: AVCaptureDevice.Position = self.isFrontCamera ? .front : .back
+            let device = self.bestCamera(ultraWide: useUltraWide, position: position)
             guard let device, let newInput = try? AVCaptureDeviceInput(device: device) else { return }
 
             self.session.beginConfiguration()
-            // Remove existing inputs
             for input in self.session.inputs { self.session.removeInput(input) }
             if self.session.canAddInput(newInput) {
                 self.session.addInput(newInput)
                 self.currentLensIsUltraWide = useUltraWide && (device.deviceType == .builtInUltraWideCamera)
             }
-            self.configureRotation()
+            // Re-apply rotation for back camera (front camera handles it at CIImage level)
+            if !self.isFrontCamera {
+                self.configureRotation()
+            }
             self.session.commitConfiguration()
+        }
+    }
+
+    // MARK: - Camera Switch (Front ↔ Back)
+    func switchCamera() {
+        isFrontCamera.toggle()
+        atomicFrontCamera.value = isFrontCamera
+
+        // Kill torch when switching to front
+        if isFrontCamera {
+            setTorch(on: false)
+        }
+
+        sessionQueue.async { [weak self] in
+            guard let self else { return }
+            let position: AVCaptureDevice.Position = self.isFrontCamera ? .front : .back
+            // Front camera never has ultra-wide
+            let useUltraWide = !self.isFrontCamera && self.atomicAnimal.value.prefersUltraWide
+            let device = self.bestCamera(ultraWide: useUltraWide, position: position)
+            guard let device, let newInput = try? AVCaptureDeviceInput(device: device) else { return }
+
+            self.session.beginConfiguration()
+            for input in self.session.inputs { self.session.removeInput(input) }
+            if self.session.canAddInput(newInput) {
+                self.session.addInput(newInput)
+                self.currentLensIsUltraWide = useUltraWide && (device.deviceType == .builtInUltraWideCamera)
+            }
+            // Only apply connection-level rotation for back camera
+            if !self.isFrontCamera {
+                self.configureRotation()
+            }
+            self.session.commitConfiguration()
+
+            // Re-enable torch for cat on back camera
+            if !self.isFrontCamera && self.atomicAnimal.value == .cat {
+                self.setTorch(on: true)
+            }
+        }
+    }
+
+    // MARK: - Photo Capture
+    func capturePhoto() {
+        guard let filtered = filteredImage else { return }
+
+        // Haptic feedback
+        let generator = UIImpactFeedbackGenerator(style: .medium)
+        generator.impactOccurred()
+
+        // Play shutter sound
+        playShutterSound()
+
+        // Freeze frame effect
+        isFreezeFrame = true
+
+        // Apply watermark + emoji overlay
+        let animal = selectedAnimal
+        let watermarked = PhotoOverlayRenderer.render(image: filtered, animal: animal)
+        capturedPhoto = watermarked
+
+        // Release freeze after short delay
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+            self?.isFreezeFrame = false
+        }
+    }
+
+    // MARK: - Shutter Sound
+    private func playShutterSound() {
+        guard let url = Bundle.main.url(forResource: "camera_shutter", withExtension: "mp3") else { return }
+        do {
+            shutterPlayer = try AVAudioPlayer(contentsOf: url)
+            shutterPlayer?.volume = 0.5
+            shutterPlayer?.play()
+        } catch {
+            // Sound unavailable — silently ignore
         }
     }
 
     // MARK: - Helpers
     /// Returns the best available camera. Falls back to wide-angle if ultra-wide isn't available.
-    private func bestCamera(ultraWide: Bool) -> AVCaptureDevice? {
-        if ultraWide,
+    private func bestCamera(ultraWide: Bool, position: AVCaptureDevice.Position = .back) -> AVCaptureDevice? {
+        if ultraWide && position == .back,
            let uw = AVCaptureDevice.default(.builtInUltraWideCamera, for: .video, position: .back) {
             return uw
         }
-        return AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back)
+        return AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: position)
     }
 
     private func configureRotation() {
@@ -269,9 +372,12 @@ fileprivate final class FrameProcessor: @unchecked Sendable {
     private var previousRawFrame: CIImage?
     private var lastFilteredImage: UIImage?
 
+    private let atomicFrontCamera: AtomicBool
+
     init(filterProcessor: AnimalFilterProcessor,
          ciContext: CIContext,
          atomicAnimal: AtomicAnimal,
+         atomicFrontCamera: AtomicBool,
          transitionManager: VisionTransitionManager,
          ambientEngine: AmbientEffectEngine,
          temporalBuffer: TemporalBuffer,
@@ -281,6 +387,7 @@ fileprivate final class FrameProcessor: @unchecked Sendable {
         self.filterProcessor = filterProcessor
         self.ciContext = ciContext
         self.atomicAnimal = atomicAnimal
+        self.atomicFrontCamera = atomicFrontCamera
         self.transitionManager = transitionManager
         self.ambientEngine = ambientEngine
         self.temporalBuffer = temporalBuffer
@@ -304,7 +411,14 @@ fileprivate final class FrameProcessor: @unchecked Sendable {
 
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
 
-        let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
+        // Front camera: rotate to portrait + mirror at the CIImage level
+        // (connection-level videoRotationAngle is unreliable for front camera)
+        let ciImage: CIImage
+        if atomicFrontCamera.value {
+            ciImage = CIImage(cvPixelBuffer: pixelBuffer).oriented(.leftMirrored)
+        } else {
+            ciImage = CIImage(cvPixelBuffer: pixelBuffer)
+        }
         let extent = ciImage.extent
 
         // ── Raw image (always current frame) ────────────────────────────
