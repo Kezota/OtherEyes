@@ -103,6 +103,7 @@ struct AnimalFilterProcessor: Sendable {
         case .eagle:        return applyEagleFilter(image)
         case .ant:          return applyAntFilter(image)
         case .spider:       return applySpiderFilter(image)
+        case .rat:          return applyRatFilter(image)
         }
     }
 
@@ -555,6 +556,34 @@ struct AnimalFilterProcessor: Sendable {
 
         return comp.cropped(to: extent)
     }
+    
+    // MARK: - 🐀 Rat: Blurry, dim, soft green-tinted vision
+        // Simulates poor visual acuity with limited colour perception (blue/green)
+        private func applyRatFilter(_ image: CIImage) -> CIImage {
+            // Step 1: Mild blur — rats have low spatial resolution
+            let blur = CIFilter.gaussianBlur()
+            blur.inputImage = image
+            blur.radius     = 3.5
+            let blurred = blur.outputImage?.cropped(to: image.extent) ?? image
+
+            // Step 2: Reduce contrast & saturation (muted, washed-out world)
+            let controls = CIFilter.colorControls()
+            controls.inputImage = blurred
+            controls.saturation = 0.35        // limited colour
+            controls.brightness = -0.10       // dim
+            controls.contrast   = 0.88        // soft, low contrast
+            let muted = controls.outputImage ?? blurred
+
+            // Step 3: Subtle green tint overlay (blue-green colour bias)
+            let matrix = CIFilter.colorMatrix()
+            matrix.inputImage  = muted
+            matrix.rVector     = CIVector(x: 0.82, y: 0.0,  z: 0.0, w: 0)   // reduce red
+            matrix.gVector     = CIVector(x: 0.0,  y: 1.08, z: 0.0, w: 0)   // slight green lift
+            matrix.bVector     = CIVector(x: 0.0,  y: 0.0,  z: 1.0, w: 0)
+            matrix.aVector     = CIVector(x: 0,    y: 0,    z: 0,   w: 1)
+            matrix.biasVector  = CIVector(x: 0,    y: 0.03, z: 0.0, w: 0)   // greenish bias
+            return (matrix.outputImage ?? muted).cropped(to: image.extent)
+        }
 
     // MARK: - 🔍 Dynamic Focus (radial vignette blur — centre sharp, edges soft)
 

@@ -6,7 +6,7 @@
 import Foundation
 
 enum Animal: String, CaseIterable, Identifiable, Hashable {
-    case dog, cat, fly, cockroach, bird, eagle, fish, mantisShrimp, ant, spider
+    case dog, cat, fly, cockroach, bird, eagle, fish, mantisShrimp, ant, spider, rat
 
     var id: String { rawValue }
 
@@ -22,6 +22,7 @@ enum Animal: String, CaseIterable, Identifiable, Hashable {
         case .eagle:        return "Eagle"
         case .ant:          return "Ant"
         case .spider:       return "Spider"
+        case .rat:          return "Rat"
         }
     }
 
@@ -37,6 +38,7 @@ enum Animal: String, CaseIterable, Identifiable, Hashable {
         case .eagle:        return "🦅"
         case .ant:          return "🐜"
         case .spider:       return "🕷️"
+        case .rat:          return "🐀"
         }
     }
 
@@ -52,6 +54,7 @@ enum Animal: String, CaseIterable, Identifiable, Hashable {
         case .eagle:        return "Hyper-focuse telescopic"
         case .ant:          return "Macro ground-level vision"
         case .spider:       return "Fragmented motion-sensitive"
+        case .rat:          return "Blurry, dim, greenish vision"
         }
     }
 
@@ -77,6 +80,8 @@ enum Animal: String, CaseIterable, Identifiable, Hashable {
             return "Most ants have very poor vision and can only see a few centimeters ahead. They navigate primarily using chemical trails and touch rather than sight."
         case .spider:
             return "Most spiders have 8 eyes arranged in different pairs. While their main pair sees sharp details, the secondary eyes are specialized for detecting motion and light changes."
+        case .rat:
+            return "Rats have very blurry vision, but they can detect even small movements in low light and rely more on their other senses to navigate."
         }
     }
 
@@ -92,6 +97,7 @@ enum Animal: String, CaseIterable, Identifiable, Hashable {
         case .eagle:        return ["#E8D4A8", "#FDF5DC"]
         case .ant:          return ["#C8A888", "#E8DCC8"]
         case .spider:       return ["#D8B8E8", "#F5E8FD"]
+        case .rat:          return ["#B8D4B8", "#E0EDD8"]
         }
     }
 
@@ -108,6 +114,7 @@ enum Animal: String, CaseIterable, Identifiable, Hashable {
         case .eagle:        return "Point at something far away — focus locks on center"
         case .ant:          return "Place your phone near the ground and look around"
         case .spider:       return "Watch moving objects pop out across your fragmented vision"
+        case .rat:          return "Move objects in frame — motion is all you see"
         }
     }
 }
