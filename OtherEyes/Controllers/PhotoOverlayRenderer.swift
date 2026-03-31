@@ -29,9 +29,9 @@ struct PhotoOverlayRenderer {
 
             // ── Layout constants (scaled to image resolution) ────────────
             let padding: CGFloat = 24 * scale
-            let appNameFontSize: CGFloat = 22 * scale
-            let perspectiveFontSize: CGFloat = 14 * scale
-            let emojiFontSize: CGFloat = 34 * scale
+            let appNameFontSize: CGFloat = 44 * scale
+            let perspectiveFontSize: CGFloat = 28 * scale
+            let emojiFontSize: CGFloat = 80 * scale
 
             let shadow = NSShadow()
             shadow.shadowColor = UIColor.black.withAlphaComponent(0.55)

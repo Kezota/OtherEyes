@@ -42,6 +42,11 @@ final class AmbientEffectEngine: @unchecked Sendable {
 
         /// Crocodile: slow water distortion wave
         var crocWaveOffset: CGFloat = 0
+
+        /// Spider: drifting fragments and pulsing
+        var spiderDriftX: CGFloat = 0
+        var spiderDriftY: CGFloat = 0
+        var spiderPulseScale: CGFloat = 1.0
     }
 
     /// Current frame's ambient parameters. Read from the render thread.
@@ -104,6 +109,12 @@ final class AmbientEffectEngine: @unchecked Sendable {
         let crocCycle = 4.5
         p.crocDriftY = CGFloat(sin(t * 2 * .pi / crocCycle) * 3.0)
         p.crocWaveOffset = CGFloat(sin(t * 2 * .pi / (crocCycle * 0.8)) * 4.0)
+
+        // Spider: continuous drift and pulsing
+        let spiderCycle = 5.0
+        p.spiderDriftX = CGFloat(sin(t * 2 * .pi / spiderCycle) * 2.0)
+        p.spiderDriftY = CGFloat(cos(t * 2 * .pi / (spiderCycle * 1.2)) * 1.5)
+        p.spiderPulseScale = 1.0 + CGFloat(sin(t * 2 * .pi / (spiderCycle * 0.9)) * 0.02)
 
         currentParams = p
     }

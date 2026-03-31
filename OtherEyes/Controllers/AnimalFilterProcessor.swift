@@ -7,91 +7,11 @@ import CoreImage
 import CoreImage.CIFilterBuiltins
 import UIKit
 
-@MainActor
-fileprivate enum SpiderLayoutCache {
-    struct Assets {
-        let masks: [CIImage]
-        let gutters: CIImage
-        let size: CGSize
-    }
-
-    static let shared: Assets = {
-        let size = CGSize(width: 1000, height: 1000)
-        let W = size.width
-        let H = size.height
-
-        // Define the 4 corners of the large central panel
-        let C1 = CGPoint(x: 0.20 * W, y: 0.35 * H)
-        let C2 = CGPoint(x: 0.85 * W, y: 0.25 * H)
-        let C3 = CGPoint(x: 0.80 * W, y: 0.70 * H)
-        let C4 = CGPoint(x: 0.15 * W, y: 0.65 * H)
-
-        // Define the 4 corners of the screen
-        let TL = CGPoint(x: 0, y: 0)
-        let TR = CGPoint(x: W, y: 0)
-        let BR = CGPoint(x: W, y: H)
-        let BL = CGPoint(x: 0, y: H)
-
-        // Define the 4 outward rays connecting center to edge
-        let M1 = CGPoint(x: 0.45 * W, y: 0)
-        let M2 = CGPoint(x: W, y: 0.55 * H)
-        let M3 = CGPoint(x: 0.55 * W, y: H)
-        let M4 = CGPoint(x: 0, y: 0.45 * H)
-
-        let polys: [[CGPoint]] = [
-            [C1, C2, C3, C4], // Center
-            [M1, TR, M2, C2, C1], // TopRight
-            [M2, BR, M3, C3, C2], // BottomRight
-            [M3, BL, M4, C4, C3], // BottomLeft
-            [M4, TL, M1, C1, C4]  // TopLeft
-        ]
-
-        var masks: [CIImage] = []
-        let format = UIGraphicsImageRendererFormat()
-        format.scale = 1
-        
-        let renderer = UIGraphicsImageRenderer(size: size, format: format)
-        
-        for poly in polys {
-            let img = renderer.image { ctx in
-                let cg = ctx.cgContext
-                cg.setFillColor(UIColor.white.cgColor)
-                cg.move(to: poly[0])
-                for p in poly.dropFirst() { cg.addLine(to: p) }
-                cg.closePath()
-                cg.fillPath()
-            }
-            if let cg = img.cgImage { masks.append(CIImage(cgImage: cg)) }
-        }
-
-        let guttersImg = renderer.image { ctx in
-            let cg = ctx.cgContext
-            cg.setStrokeColor(UIColor.black.cgColor)
-            cg.setLineWidth(4.0) // Thinner comic book gutter lines
-            cg.setLineJoin(.bevel)
-            
-            // Draw all lines outlining the regions
-            let lines: [(CGPoint, CGPoint)] = [
-                (C1, C2), (C2, C3), (C3, C4), (C4, C1), // Center box edges
-                (C1, M1), (C2, M2), (C3, M3), (C4, M4)  // Outer ray edges
-            ]
-            for (p1, p2) in lines {
-                cg.move(to: p1)
-                cg.addLine(to: p2)
-            }
-            cg.strokePath()
-        }
-        
-        let guttersCI = CIImage(cgImage: guttersImg.cgImage!)
-        return Assets(masks: masks, gutters: guttersCI, size: size)
-    }()
-}
-
 struct AnimalFilterProcessor: Sendable {
 
     private let context = CIContext()
 
-    func apply(animal: Animal, to image: CIImage) -> CIImage {
+    func apply(animal: Animal, to image: CIImage, params: AmbientEffectEngine.AmbientParams? = nil) -> CIImage {
         switch animal {
         case .dog:          return applyDogFilter(image)
         case .cat:          return applyCatFilter(image)
@@ -102,7 +22,7 @@ struct AnimalFilterProcessor: Sendable {
         case .mantisShrimp: return applyMantisFilter(image)
         case .eagle:        return applyEagleFilter(image)
         case .ant:          return applyAntFilter(image)
-        case .spider:       return applySpiderFilter(image)
+        case .spider:       return applySpiderFilter(image, params: params)
         case .rat:          return applyRatFilter(image)
         case .crocodile:    return applyCrocodileFilter(image)
         }
@@ -478,84 +398,192 @@ struct AnimalFilterProcessor: Sendable {
         return controls.outputImage?.cropped(to: extent) ?? distorted
     }
 
-    // MARK: - 🕷️ Spider: Multiple Camera View (Comic Layout)
-    // Simulates secondary eyes via scattered, duplicated camera panels separated by thick black gutters.
-    private func applySpiderFilter(_ image: CIImage) -> CIImage {
+    // MARK: - 🕷️ Spider: Fragmented Multiple Eyes Vision
+    private func applySpiderFilter(_ image: CIImage, params: AmbientEffectEngine.AmbientParams?) -> CIImage {
         let extent = image.extent
         let cx = extent.midX
         let cy = extent.midY
 
-        // We assume main thread rendering because UI updates dictate this.
-        let cache: SpiderLayoutCache.Assets
-        if Thread.isMainThread {
-            cache = SpiderLayoutCache.shared
-        } else {
-            cache = DispatchQueue.main.sync { SpiderLayoutCache.shared }
+        let driftX = params?.spiderDriftX ?? 0
+        let driftY = params?.spiderDriftY ?? 0
+        let pulse = params?.spiderPulseScale ?? 1.0
+
+        // 1. Main Eye (Primary Focus)
+        // Zoom slightly, hyper-sharp, higher contrast, and vivid warm tint
+        let mainZoom = CGAffineTransform(translationX: cx, y: cy)
+            .scaledBy(x: 1.08, y: 1.08)
+            .translatedBy(x: -cx, y: -cy)
+        var mainEye = image.transformed(by: mainZoom).cropped(to: extent)
+        
+        if let unsharp = CIFilter(name: "CIUnsharpMask") {
+            unsharp.setValue(mainEye, forKey: kCIInputImageKey)
+            unsharp.setValue(NSNumber(value: 2.5), forKey: kCIInputRadiusKey)
+            unsharp.setValue(NSNumber(value: 0.8), forKey: kCIInputIntensityKey)
+            mainEye = unsharp.outputImage?.cropped(to: extent) ?? mainEye
         }
         
-        let scaleX = extent.width / cache.size.width
-        let scaleY = extent.height / cache.size.height
-        let maskTransform = CGAffineTransform(scaleX: scaleX, y: scaleY)
+        let controls = CIFilter.colorControls()
+        controls.inputImage = mainEye
+        controls.contrast = 1.15
+        controls.brightness = 0.02
+        controls.saturation = 1.15
+        mainEye = controls.outputImage?.cropped(to: extent) ?? mainEye
 
-        let compositeSourceOver = CIFilter.sourceOverCompositing()
-        var comp = CIImage(color: .black).cropped(to: extent)
+        // Subtle warm tint to feel predatory
+        let warmTint = CIFilter.colorMatrix()
+        warmTint.inputImage = mainEye
+        warmTint.rVector = CIVector(x: 1.05, y: 0.0, z: 0.0, w: 0)
+        warmTint.gVector = CIVector(x: 0.0, y: 1.02, z: 0.0, w: 0)
+        warmTint.bVector = CIVector(x: 0.0, y: 0.0, z: 0.95, w: 0)
+        warmTint.aVector = CIVector(x: 0, y: 0, z: 0, w: 1)
+        mainEye = warmTint.outputImage?.cropped(to: extent) ?? mainEye
 
-        // Panel contents configured with messy transformations
-        let configs: [(scale: CGFloat, rot: CGFloat, bx: CGFloat, by: CGFloat, blur: Double)] = [
-            (1.00,  0.0,    0,   0, 0.0), // Center: sharp, perfectly sized
-            (0.85,  0.1,  -30,  30, 4.0), // TopRight: blurred, slightly rotated
-            (0.90, -0.15,  20,  50, 5.0), // BottomRight
-            (0.80,  0.05, -40, -40, 3.5), // BottomLeft
-            (0.95, -0.08,  20, -50, 4.5)  // TopLeft
+        // 2. Secondary Eyes Setup
+        // Blurred, slightly desaturated, mirrored fragments
+        var secondaryBase = image
+        let blur = CIFilter.gaussianBlur()
+        blur.inputImage = secondaryBase
+        blur.radius = 4.5
+        secondaryBase = blur.outputImage?.cropped(to: extent) ?? secondaryBase
+
+        // UV / Cool Tint (Shift towards blue/purple) + Bokeh Contrast
+        let secControls = CIFilter.colorControls()
+        secControls.inputImage = secondaryBase
+        secControls.saturation = 0.95
+        secControls.contrast = 1.05
+        secControls.brightness = 0.02
+        let contrastBase = secControls.outputImage?.cropped(to: extent) ?? secondaryBase
+        
+        let uvTint = CIFilter.colorMatrix()
+        uvTint.inputImage = contrastBase
+        uvTint.rVector = CIVector(x: 0.9, y: 0.0, z: 0.0, w: 0)
+        uvTint.gVector = CIVector(x: 0.0, y: 1.0, z: 0.0, w: 0)
+        uvTint.bVector = CIVector(x: 0.0, y: 0.0, z: 1.1, w: 0)
+        uvTint.aVector = CIVector(x: 0, y: 0, z: 0, w: 1)
+        uvTint.biasVector = CIVector(x: 0.0, y: 0.02, z: 0.05, w: 0)
+        secondaryBase = uvTint.outputImage?.cropped(to: extent) ?? contrastBase
+
+        // Chromatic Aberration: split R and B
+        let redScale = CGAffineTransform(translationX: cx, y: cy).scaledBy(x: 1.01, y: 1.01).translatedBy(x: -cx, y: -cy)
+        let blueScale = CGAffineTransform(translationX: cx, y: cy).scaledBy(x: 0.99, y: 0.99).translatedBy(x: -cx, y: -cy)
+        
+        let redCh = CIFilter.colorMatrix()
+        redCh.inputImage = secondaryBase.transformed(by: redScale).cropped(to: extent)
+        redCh.rVector = CIVector(x: 1, y: 0, z: 0, w: 0)
+        redCh.gVector = CIVector(x: 0, y: 0, z: 0, w: 0)
+        redCh.bVector = CIVector(x: 0, y: 0, z: 0, w: 0)
+        redCh.aVector = CIVector(x: 0, y: 0, z: 0, w: 1)
+        let redOnly = redCh.outputImage ?? secondaryBase
+
+        let greenCh = CIFilter.colorMatrix()
+        greenCh.inputImage = secondaryBase
+        greenCh.rVector = CIVector(x: 0, y: 0, z: 0, w: 0)
+        greenCh.gVector = CIVector(x: 0, y: 1, z: 0, w: 0)
+        greenCh.bVector = CIVector(x: 0, y: 0, z: 0, w: 0)
+        greenCh.aVector = CIVector(x: 0, y: 0, z: 0, w: 1)
+        let greenOnly = greenCh.outputImage ?? secondaryBase
+
+        let blueCh = CIFilter.colorMatrix()
+        blueCh.inputImage = secondaryBase.transformed(by: blueScale).cropped(to: extent)
+        blueCh.rVector = CIVector(x: 0, y: 0, z: 0, w: 0)
+        blueCh.gVector = CIVector(x: 0, y: 0, z: 0, w: 0)
+        blueCh.bVector = CIVector(x: 0, y: 0, z: 1, w: 0)
+        blueCh.aVector = CIVector(x: 0, y: 0, z: 0, w: 1)
+        let blueOnly = blueCh.outputImage ?? secondaryBase
+
+        let addRG = CIFilter.additionCompositing()
+        addRG.inputImage = redOnly.cropped(to: extent)
+        addRG.backgroundImage = greenOnly.cropped(to: extent)
+        let rg = addRG.outputImage ?? greenOnly
+
+        let addRGB = CIFilter.additionCompositing()
+        addRGB.inputImage = blueOnly.cropped(to: extent)
+        addRGB.backgroundImage = rg.cropped(to: extent)
+        secondaryBase = addRGB.outputImage?.cropped(to: extent) ?? secondaryBase
+
+        // Configuration for the 6 secondary eyes:
+        // (offset X, offset Y, scale X, scale Y, rotation, hue shift)
+        let eyeConfigs: [(ox: CGFloat, oy: CGFloat, sx: CGFloat, sy: CGFloat, rot: CGFloat, hue: Float)] = [
+            // Top Left (mirrored X/Y)
+            (-0.35 * extent.width, -0.30 * extent.height, -0.95, -0.95, 0.05, -0.05),
+            // Top Right (mirrored Y)
+            ( 0.35 * extent.width, -0.30 * extent.height,  0.95, -0.95, -0.05, 0.05),
+            // Mid Left (mirrored X, closer)
+            (-0.40 * extent.width,  0.0,                  -0.90,  0.90, 0.08, -0.02),
+            // Mid Right normal, closer
+            ( 0.40 * extent.width,  0.0,                   0.90,  0.90, -0.08, 0.02),
+            // Bottom Left (mirrored X, smaller)
+            (-0.32 * extent.width,  0.30 * extent.height, -0.80,  0.80, -0.04, 0.06),
+            // Bottom Right normal, smaller
+            ( 0.32 * extent.width,  0.30 * extent.height,  0.80,  0.80, 0.04, -0.06)
         ]
 
+        var comp = mainEye
+        let compositeSourceOver = CIFilter.sourceOverCompositing()
         let blendMask = CIFilter.blendWithMask()
-        blendMask.backgroundImage = CIImage(color: .clear).cropped(to: extent)
 
-        for (i, config) in configs.enumerated() {
-            guard i < cache.masks.count else { continue }
+        for (i, cfg) in eyeConfigs.enumerated() {
+            // Apply drift and pulse (alternate direction based on index to seem independent)
+            let eyeDriftX = (i % 2 == 0) ? driftX : -driftX
+            let eyeDriftY = (i < 3) ? driftY : -driftY
+            let eyePulse = pulse
+
+            // Vary each eye slightly so they don't look identical
+            let hueAdjust = CIFilter.hueAdjust()
+            hueAdjust.inputImage = secondaryBase
+            hueAdjust.angle = cfg.hue
             
-            var panel = image
-            if config.blur > 0 {
-                let blur = CIFilter.gaussianBlur()
-                blur.inputImage = panel
-                // Spider blur adjustment
-                blur.radius = Float(config.blur)
-                panel = blur.outputImage?.cropped(to: extent) ?? panel
-                
-                let controls = CIFilter.colorControls()
-                controls.inputImage = panel
-                controls.saturation = 0.8
-                controls.brightness = -0.05
-                panel = controls.outputImage?.cropped(to: extent) ?? panel
-            }
+            let eyeControls = CIFilter.colorControls()
+            eyeControls.inputImage = hueAdjust.outputImage ?? secondaryBase
+            eyeControls.brightness = Float(0.01 * CGFloat(i % 3)) // slight brightness variance
+            eyeControls.contrast = 1.0 + Float(0.02 * CGFloat(i % 2)) // slight contrast variance
+            let variedEyeBase = eyeControls.outputImage?.cropped(to: extent) ?? secondaryBase
 
-            let translated = panel.transformed(
-                by: CGAffineTransform(translationX: -cx, y: -cy)
-                    .scaledBy(x: config.scale, y: config.scale)
-                    .rotated(by: config.rot)
-                    .translatedBy(x: cx + config.bx, y: cy + config.by)
-            )
+            // Transform the secondary feed for this eye
+            let eyeTransform = CGAffineTransform(translationX: cx, y: cy)
+                .translatedBy(x: cfg.ox + eyeDriftX, y: cfg.oy + eyeDriftY)
+                .rotated(by: cfg.rot)
+                .scaledBy(x: cfg.sx * eyePulse, y: cfg.sy * eyePulse)
+                .translatedBy(x: -cx, y: -cy)
+            
+            let transformedEye = variedEyeBase.transformed(by: eyeTransform).cropped(to: extent)
 
-            let mask = cache.masks[i].transformed(by: maskTransform).cropped(to: extent)
-            blendMask.inputImage = translated.cropped(to: extent)
-            blendMask.maskImage = mask
+            // Create soft radial mask for this eye
+            // Size them to be roughly 30% of the screen width
+            let radius = min(extent.width, extent.height) * 0.28
+            guard let radGrad = CIFilter(name: "CIRadialGradient") else { continue }
+            let centerPoint = CIVector(x: cx + cfg.ox, y: cy + cfg.oy)
+            radGrad.setValue(centerPoint, forKey: "inputCenter")
+            radGrad.setValue(NSNumber(value: radius * 0.4), forKey: "inputRadius0") // solid center
+            radGrad.setValue(NSNumber(value: radius), forKey: "inputRadius1")       // soft fade
+            radGrad.setValue(CIColor.white, forKey: "inputColor0")
+            radGrad.setValue(CIColor.clear, forKey: "inputColor1")
+            
+            guard let mask = radGrad.outputImage?.cropped(to: extent) else { continue }
 
-            guard let maskedPanel = blendMask.outputImage?.cropped(to: extent) else {
-                continue
-            }
+            // Apply slight global opacity to mask for blending (0.9)
+            let opacity = CIFilter.colorMatrix()
+            opacity.inputImage = mask
+            opacity.aVector = CIVector(x: 0, y: 0, z: 0, w: 0.9)
+            let softMask = opacity.outputImage?.cropped(to: extent) ?? mask
 
-            compositeSourceOver.inputImage = maskedPanel
+            // Composite
+            blendMask.inputImage = transformedEye
+            blendMask.backgroundImage = CIImage.empty().cropped(to: extent) // transparent background
+            blendMask.maskImage = softMask
+            let maskedEye = blendMask.outputImage?.cropped(to: extent) ?? transformedEye
+
+            compositeSourceOver.inputImage = maskedEye
             compositeSourceOver.backgroundImage = comp
             comp = compositeSourceOver.outputImage?.cropped(to: extent) ?? comp
         }
 
-        let gutters = cache.gutters.transformed(by: maskTransform).cropped(to: extent)
-        compositeSourceOver.inputImage = gutters
-        compositeSourceOver.backgroundImage = comp
-        comp = compositeSourceOver.outputImage?.cropped(to: extent) ?? comp
-
-        return comp.cropped(to: extent)
+        // 3. Deep Global Vignette over the whole compound view
+        let vignette = CIFilter.vignette()
+        vignette.inputImage = comp
+        vignette.radius = 2.0
+        vignette.intensity = 0.45 // Lighter vignette, not too dark
+        return vignette.outputImage?.cropped(to: extent) ?? comp
     }
     
     // MARK: - 🐀 Rat: Blurry, dim, soft green-tinted vision

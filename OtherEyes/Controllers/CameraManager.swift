@@ -432,12 +432,13 @@ fileprivate final class FrameProcessor: @unchecked Sendable {
             if animal == .fly { lastFlyFrameTime = now }
             
             var filteredCI: CIImage
+            let ambientParams = ambientEngine.currentParams
 
         if transitionManager.isTransitioning, let prevAnimal = transitionManager.previousAnimal {
             // Crossfade: blend previous and current animal filters
             let progress = transitionManager.progress
-            let prevFiltered = filterProcessor.apply(animal: prevAnimal, to: ciImage)
-            let newFiltered  = filterProcessor.apply(animal: animal, to: ciImage)
+            let prevFiltered = filterProcessor.apply(animal: prevAnimal, to: ciImage, params: ambientParams)
+            let newFiltered  = filterProcessor.apply(animal: animal, to: ciImage, params: ambientParams)
 
             // Linear interpolation via CIBlendWithAlphaMask with a constant‐color mask
             let maskColor = CIImage(color: CIColor(red: CGFloat(progress),
@@ -451,11 +452,10 @@ fileprivate final class FrameProcessor: @unchecked Sendable {
             blend.maskImage = maskColor
             filteredCI = blend.outputImage?.cropped(to: extent) ?? newFiltered
         } else {
-            filteredCI = filterProcessor.apply(animal: animal, to: ciImage)
+            filteredCI = filterProcessor.apply(animal: animal, to: ciImage, params: ambientParams)
         }
 
         // Apply per-animal ambient effects
-        let ambientParams = ambientEngine.currentParams
         filteredCI = filterProcessor.applyAmbientEffect(animal: animal, to: filteredCI, params: ambientParams)
 
         // Apply dynamic focus (centre sharp, edges softly blurred)

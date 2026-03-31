@@ -62,24 +62,55 @@ struct MotionAnalyzer: Sendable {
     }
 
     /// Apply the motion mask for Spider vision:
-    /// - Moving areas → heavily brightened and high contrast
-    /// - Static areas → show the original (fragmented/dimmed) filtered view
+    /// - Moving areas in the periphery → heavily brightened and high contrast
+    /// - Static areas and center → show the original filtered view
     func applySpiderMotionHighlight(image: CIImage, motionMask: CIImage, rawImage: CIImage) -> CIImage {
         let extent = image.extent
+        let cx = extent.midX
+        let cy = extent.midY
 
         // Create a brightened, sharper version of the raw image for the moving parts
         let brighten = CIFilter.colorControls()
         brighten.inputImage = rawImage
-        brighten.brightness = 0.15     // lift shadows
-        brighten.contrast = 1.35       // strong contrast
-        brighten.saturation = 1.25     // slight color boost
+        brighten.brightness = 0.35     // huge exposure blow-out
+        brighten.contrast = 1.60       // extreme contrast
+        brighten.saturation = 1.80     // super saturated for an electric feel
         let brightRaw = brighten.outputImage?.cropped(to: extent) ?? rawImage
 
-        // Blend: motion areas get the bright raw version, static keep the fragmented base
+        // Add a "bloom" / glow effect to the brightly lit motion
+        let bloomBlur = CIFilter.gaussianBlur()
+        bloomBlur.inputImage = brightRaw
+        bloomBlur.radius = 12.0
+        let blurredBright = bloomBlur.outputImage?.cropped(to: extent) ?? brightRaw
+
+        let bloomAdd = CIFilter.additionCompositing()
+        bloomAdd.inputImage = blurredBright
+        bloomAdd.backgroundImage = brightRaw
+        let glowingMotion = bloomAdd.outputImage?.cropped(to: extent) ?? brightRaw
+
+        // Restrict motion highlight to the periphery (secondary eyes)
+        // Center (main eye) should stay relatively stable
+        let radius = min(extent.width, extent.height) * 0.45
+        guard let radGrad = CIFilter(name: "CIRadialGradient") else { return image }
+        radGrad.setValue(CIVector(x: cx, y: cy), forKey: "inputCenter")
+        radGrad.setValue(NSNumber(value: radius * 0.4), forKey: "inputRadius0") // black in center
+        radGrad.setValue(NSNumber(value: radius), forKey: "inputRadius1")       // white on edges
+        radGrad.setValue(CIColor.black, forKey: "inputColor0")
+        radGrad.setValue(CIColor.white, forKey: "inputColor1")
+        
+        let peripheralMask = radGrad.outputImage?.cropped(to: extent) ?? motionMask
+
+        // Combine motion mask with the peripheral mask (Multiply)
+        let multiply = CIFilter.multiplyBlendMode()
+        multiply.inputImage = motionMask
+        multiply.backgroundImage = peripheralMask
+        let finalMotionMask = multiply.outputImage?.cropped(to: extent) ?? motionMask
+
+        // Blend: motion areas get the bright glowing version, static keep the base image
         let blend = CIFilter.blendWithMask()
-        blend.inputImage = brightRaw
+        blend.inputImage = glowingMotion
         blend.backgroundImage = image
-        blend.maskImage = motionMask
+        blend.maskImage = finalMotionMask
         return blend.outputImage?.cropped(to: extent) ?? image
     }
 
