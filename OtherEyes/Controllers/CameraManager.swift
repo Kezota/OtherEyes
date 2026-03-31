@@ -482,6 +482,12 @@ fileprivate final class FrameProcessor: @unchecked Sendable {
             filteredCI = motionAnalyzer.applySpiderMotionHighlight(image: filteredCI, motionMask: mask, rawImage: ciImage)
         }
 
+        // 🐊 Crocodile: motion detection — slightly enhance moving areas
+        if animal == .crocodile, let prevRaw = previousRawFrame {
+            let mask = motionAnalyzer.motionMask(current: ciImage, previous: prevRaw)
+            filteredCI = motionAnalyzer.applyCrocodileMotionHighlight(image: filteredCI, motionMask: mask, rawImage: ciImage)
+        }
+
         // 🐜 Ant: parallax shift based on device tilt
         if animal == .ant {
             let offset = parallaxManager.currentOffset

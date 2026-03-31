@@ -82,4 +82,33 @@ struct MotionAnalyzer: Sendable {
         blend.maskImage = motionMask
         return blend.outputImage?.cropped(to: extent) ?? image
     }
+
+    /// Apply the motion mask for Crocodile vision:
+    /// - Moving areas → slightly enhanced brightness and clarity
+    /// - Static areas → show the original filtered view
+    func applyCrocodileMotionHighlight(image: CIImage, motionMask: CIImage, rawImage: CIImage) -> CIImage {
+        let extent = image.extent
+
+        // Enhance clarity / brightness slightly for moving areas
+        let brighten = CIFilter.colorControls()
+        brighten.inputImage = rawImage
+        brighten.brightness = 0.08
+        brighten.contrast = 1.15
+        brighten.saturation = 1.10
+        let brightRaw = brighten.outputImage?.cropped(to: extent) ?? rawImage
+
+        var enhancedMotion = brightRaw
+        if let sharpen = CIFilter(name: "CISharpenLuminance") {
+            sharpen.setValue(brightRaw, forKey: kCIInputImageKey)
+            sharpen.setValue(NSNumber(value: 0.9), forKey: kCIInputSharpnessKey)
+            enhancedMotion = sharpen.outputImage?.cropped(to: extent) ?? brightRaw
+        }
+
+        // Blend: motion areas get enhanced version, static get the crocodile filter
+        let blend = CIFilter.blendWithMask()
+        blend.inputImage = enhancedMotion
+        blend.backgroundImage = image
+        blend.maskImage = motionMask
+        return blend.outputImage?.cropped(to: extent) ?? image
+    }
 }

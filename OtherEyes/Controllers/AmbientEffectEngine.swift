@@ -36,6 +36,12 @@ final class AmbientEffectEngine: @unchecked Sendable {
 
         /// Eagle: slow zoom breathing (subtle focus pulse)
         var eagleBreathScale: CGFloat = 1.0
+
+        /// Crocodile: slow vertical drift
+        var crocDriftY: CGFloat = 0
+
+        /// Crocodile: slow water distortion wave
+        var crocWaveOffset: CGFloat = 0
     }
 
     /// Current frame's ambient parameters. Read from the render thread.
@@ -93,6 +99,11 @@ final class AmbientEffectEngine: @unchecked Sendable {
         // Eagle: slow zoom breathing — ±0.7% scale over 4s
         let eagleCycle = 4.0
         p.eagleBreathScale = 1.0 + CGFloat(sin(t * 2 * .pi / eagleCycle) * 0.007)
+
+        // Crocodile: slow drift and water wave
+        let crocCycle = 4.5
+        p.crocDriftY = CGFloat(sin(t * 2 * .pi / crocCycle) * 3.0)
+        p.crocWaveOffset = CGFloat(sin(t * 2 * .pi / (crocCycle * 0.8)) * 4.0)
 
         currentParams = p
     }

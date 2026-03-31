@@ -104,6 +104,7 @@ struct AnimalFilterProcessor: Sendable {
         case .ant:          return applyAntFilter(image)
         case .spider:       return applySpiderFilter(image)
         case .rat:          return applyRatFilter(image)
+        case .crocodile:    return applyCrocodileFilter(image)
         }
     }
 
@@ -585,6 +586,77 @@ struct AnimalFilterProcessor: Sendable {
             return (matrix.outputImage ?? muted).cropped(to: image.extent)
         }
 
+    // MARK: - 🐊 Crocodile: Split half-submerged vision
+    private func applyCrocodileFilter(_ image: CIImage) -> CIImage {
+        let extent = image.extent
+        let cx = extent.midX
+        let cy = extent.midY
+
+        // 1. Low-angle perspective: slight zoom + vertical shift down
+        let zoomScale: CGFloat = 1.15
+        let transform = CGAffineTransform(translationX: cx, y: cy)
+            .scaledBy(x: zoomScale, y: zoomScale)
+            .translatedBy(x: -cx, y: -cy - (extent.height * 0.05)) // shift down 5%
+        let zoomed = image.transformed(by: transform).cropped(to: extent)
+
+        // 2. Top Half (Above water): Sharper, higher contrast
+        var topHalf = zoomed
+        if let sharpen = CIFilter(name: "CISharpenLuminance") {
+            sharpen.setValue(zoomed, forKey: kCIInputImageKey)
+            sharpen.setValue(NSNumber(value: 0.8), forKey: kCIInputSharpnessKey)
+            topHalf = sharpen.outputImage?.cropped(to: extent) ?? zoomed
+        }
+        let topControls = CIFilter.colorControls()
+        topControls.inputImage = topHalf
+        topControls.contrast = 1.1
+        topHalf = topControls.outputImage?.cropped(to: extent) ?? topHalf
+
+        // 3. Bottom Half (Below water): Blurry, murky, dim, green/blue tint
+        let blur = CIFilter.gaussianBlur()
+        blur.inputImage = zoomed
+        blur.radius = 4.0
+        let blurredBottom = blur.outputImage?.cropped(to: extent) ?? zoomed
+
+        let bottomControls = CIFilter.colorControls()
+        bottomControls.inputImage = blurredBottom
+        bottomControls.saturation = 0.8
+        bottomControls.brightness = -0.15
+        bottomControls.contrast = 0.9
+        let dimBottom = bottomControls.outputImage?.cropped(to: extent) ?? blurredBottom
+
+        let tint = CIFilter.colorMatrix()
+        tint.inputImage = dimBottom
+        tint.rVector = CIVector(x: 0.6, y: 0.0, z: 0.0, w: 0)
+        tint.gVector = CIVector(x: 0.0, y: 1.1, z: 0.0, w: 0)
+        tint.bVector = CIVector(x: 0.0, y: 0.0, z: 1.2, w: 0)
+        tint.aVector = CIVector(x: 0, y: 0, z: 0, w: 1)
+        tint.biasVector = CIVector(x: 0, y: 0.05, z: 0.1, w: 0)
+        let bottomHalf = tint.outputImage?.cropped(to: extent) ?? dimBottom
+
+        // 4. Gradient Mask for horizontal split
+        // output = inputImage * maskImage + backgroundImage * (1 - maskImage)
+        guard let grad = CIFilter(name: "CILinearGradient") else { return zoomed }
+        grad.setValue(CIVector(x: cx, y: cy - extent.height * 0.05), forKey: "inputPoint0") // start blending slightly below center
+        grad.setValue(CIVector(x: cx, y: cy + extent.height * 0.05), forKey: "inputPoint1")
+        grad.setValue(CIColor.black, forKey: "inputColor0") // bottom is black (takes background -> bottomHalf)
+        grad.setValue(CIColor.white, forKey: "inputColor1") // top is white (takes input -> topHalf)
+        let mask = grad.outputImage?.cropped(to: extent)
+
+        let blend = CIFilter.blendWithMask()
+        blend.inputImage = topHalf
+        blend.backgroundImage = bottomHalf
+        blend.maskImage = mask
+        let splitImage = blend.outputImage?.cropped(to: extent) ?? zoomed
+
+        // 5. Global styling
+        let globalControls = CIFilter.colorControls()
+        globalControls.inputImage = splitImage
+        globalControls.saturation = 0.85
+        globalControls.contrast = 1.05
+        globalControls.brightness = -0.05
+        return globalControls.outputImage?.cropped(to: extent) ?? splitImage
+    }
+
     // MARK: - 🔍 Dynamic Focus (radial vignette blur — centre sharp, edges soft)
 
     func applyDynamicFocus(_ image: CIImage) -> CIImage {
@@ -679,6 +751,24 @@ struct AnimalFilterProcessor: Sendable {
                 .scaledBy(x: s, y: s)
                 .translatedBy(x: -cx, y: -cy)
             return image.transformed(by: transform).cropped(to: image.extent)
+
+        case .crocodile:
+            // 1. Slow vertical drift
+            let drift = CGAffineTransform(translationX: 0, y: params.crocDriftY)
+            let drifted = image.transformed(by: drift).cropped(to: image.extent)
+            
+            // 2. Ripple/wave in the bottom half
+            let center = CGPoint(
+                x: image.extent.midX + params.crocWaveOffset,
+                y: image.extent.minY + image.extent.height * 0.25 // focus on the bottom quadrant
+            )
+            guard let bump = CIFilter(name: "CIBumpDistortion") else { return drifted }
+            bump.setValue(drifted, forKey: kCIInputImageKey)
+            bump.setValue(CIVector(cgPoint: center), forKey: kCIInputCenterKey)
+            bump.setValue(NSNumber(value: Float(image.extent.width * 0.8)), forKey: kCIInputRadiusKey)
+            bump.setValue(NSNumber(value: 0.1), forKey: kCIInputScaleKey) // mild distortion
+            
+            return bump.outputImage?.cropped(to: image.extent) ?? drifted
 
         default:
             // Dog, Cat, Rat, Ant — no ambient effect
