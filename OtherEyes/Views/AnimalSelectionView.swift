@@ -72,7 +72,7 @@ struct AnimalSelectionView: View {
 
                             Text("See the world through different creatures")
                                 .font(.system(size: 16, weight: .medium, design: .rounded))
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(Color(red: 0.40, green: 0.40, blue: 0.50))
                                 .multilineTextAlignment(.center)
                         }
                         .padding(.top, 8)
@@ -81,7 +81,7 @@ struct AnimalSelectionView: View {
                         VStack(spacing: 12) {
                             Text("Choose your perspective")
                                 .font(.system(size: 13, weight: .semibold, design: .rounded))
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(Color(red: 0.40, green: 0.40, blue: 0.50))
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .padding(.horizontal, 4)
 

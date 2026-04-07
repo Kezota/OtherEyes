@@ -15,11 +15,11 @@ struct AnimalCard: View {
 
             Text(animal.name)
                 .font(.system(size: 15, weight: .semibold, design: .rounded))
-                .foregroundStyle(.primary.opacity(0.85))
+                .foregroundStyle(Color(red: 0.15, green: 0.15, blue: 0.20))
 
             Text(animal.description)
                 .font(.system(size: 11, weight: .regular, design: .rounded))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Color(red: 0.35, green: 0.35, blue: 0.40))
                 .multilineTextAlignment(.center)
                 .lineLimit(2)
                 .minimumScaleFactor(0.8)
