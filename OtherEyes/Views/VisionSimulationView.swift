@@ -26,6 +26,12 @@ struct VisionSimulationView: View {
 
     // NEW: Animal dropdown
     @State private var showAnimalPicker = false
+    @State private var dropdownFromHeader = false
+
+    // Inline divider drag state
+    @State private var isDraggingDivider = false
+    @State private var lastDividerHapticStep: Int = -1
+    private let dividerFeedback = UISelectionFeedbackGenerator()
 
     init(initialAnimal: Animal) {
         self.initialAnimal = initialAnimal
@@ -106,18 +112,29 @@ struct VisionSimulationView: View {
                     }
                     .zIndex(29)
 
-                // Dropdown panel anchored to bottom-left
-                VStack {
-                    Spacer()
-                    HStack {
+                if dropdownFromHeader {
+                    // Dropdown anchored below the header (top-center)
+                    VStack {
                         animalDropdown
-                            .padding(.leading, 28)
-                            .padding(.bottom, 100)
+                            .padding(.top, 56)
                         Spacer()
                     }
+                    .transition(.scale(scale: 0.85, anchor: .top).combined(with: .opacity))
+                    .zIndex(30)
+                } else {
+                    // Dropdown panel anchored to bottom-left
+                    VStack {
+                        Spacer()
+                        HStack {
+                            animalDropdown
+                                .padding(.leading, 28)
+                                .padding(.bottom, 100)
+                            Spacer()
+                        }
+                    }
+                    .transition(.scale(scale: 0.85, anchor: .bottomLeading).combined(with: .opacity))
+                    .zIndex(30)
                 }
-                .transition(.scale(scale: 0.85, anchor: .bottomLeading).combined(with: .opacity))
-                .zIndex(30)
             }
         }
         .ignoresSafeArea(edges: .bottom)
@@ -230,14 +247,80 @@ struct VisionSimulationView: View {
                                     .frame(width: humanWidth)
                             }
                         )
-
-                    // Vertical divider line
-                    Rectangle()
-                        .fill(.white.opacity(0.75))
-                        .frame(width: 2, height: geo.size.height)
-                        .position(x: xOffset, y: geo.size.height / 2)
-                        .shadow(color: .black.opacity(0.3), radius: 4)
                 }
+
+                // ── Inline divider + draggable handle ────────────────────
+                let xPos = geo.size.width * sliderValue
+
+                // Vertical divider line
+                Rectangle()
+                    .fill(.white.opacity(0.8))
+                    .frame(width: 2.5, height: geo.size.height)
+                    .shadow(color: .black.opacity(0.4), radius: 6)
+                    .position(x: xPos, y: geo.size.height / 2)
+                    .allowsHitTesting(false)
+
+                // Draggable handle knob on the divider
+                ZStack {
+                    // Outer glow ring
+                    Circle()
+                        .fill(.ultraThinMaterial)
+                        .overlay {
+                            Circle()
+                                .fill(
+                                    RadialGradient(
+                                        colors: [.white.opacity(0.2), .clear],
+                                        center: .topLeading,
+                                        startRadius: 0,
+                                        endRadius: 20
+                                    )
+                                )
+                        }
+                        .overlay {
+                            Circle()
+                                .stroke(
+                                    LinearGradient(
+                                        colors: [.white.opacity(0.9), .white.opacity(0.35)],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    ),
+                                    lineWidth: 1.5
+                                )
+                        }
+                        .shadow(color: .black.opacity(0.35), radius: 10, x: 0, y: 3)
+                        .shadow(color: .white.opacity(isDraggingDivider ? 0.25 : 0), radius: 14)
+
+                    // Left/right arrows inside
+                    HStack(spacing: 4) {
+                        Image(systemName: "chevron.left")
+                        Image(systemName: "chevron.right")
+                    }
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.8))
+                }
+                .frame(width: 36, height: 36)
+                .scaleEffect(isDraggingDivider ? 1.18 : 1.0)
+                .animation(.spring(response: 0.2, dampingFraction: 0.55), value: isDraggingDivider)
+                .position(x: xPos, y: geo.size.height / 2)
+                .gesture(
+                    DragGesture(minimumDistance: 0)
+                        .onChanged { g in
+                            isDraggingDivider = true
+                            let newValue = min(max(g.location.x / geo.size.width, 0), 1)
+                            sliderValue = newValue
+
+                            // Haptic at every 10% step
+                            let step = Int(newValue * 10)
+                            if step != lastDividerHapticStep {
+                                lastDividerHapticStep = step
+                                dividerFeedback.selectionChanged()
+                            }
+                        }
+                        .onEnded { _ in
+                            isDraggingDivider = false
+                        }
+                )
+
             }
         }
     }
@@ -282,24 +365,36 @@ struct VisionSimulationView: View {
 
             Spacer()
 
-            // Animal name
-            HStack(spacing: 6) {
-                Text(selectedAnimal.emoji)
-                    .font(.system(size: 16))
-                Text(selectedAnimal.name)
-                    .font(.system(size: 16, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.white)
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 9)
-            .background {
-                Capsule()
-                    .fill(.ultraThinMaterial)
-                    .overlay {
-                        Capsule()
-                            .stroke(.white.opacity(0.4), lineWidth: 1)
-                    }
-                    .shadow(color: .black.opacity(0.2), radius: 8, x: 0, y: 2)
+            // Animal name (tappable → opens dropdown)
+            Button {
+                dropdownFromHeader = true
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) {
+                    showAnimalPicker.toggle()
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    Text(selectedAnimal.emoji)
+                        .font(.system(size: 16))
+                    Text(selectedAnimal.name)
+                        .font(.system(size: 16, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.white)
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.6))
+                        .rotationEffect(.degrees(showAnimalPicker && dropdownFromHeader ? 180 : 0))
+                        .animation(.easeInOut(duration: 0.2), value: showAnimalPicker)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 9)
+                .background {
+                    Capsule()
+                        .fill(.ultraThinMaterial)
+                        .overlay {
+                            Capsule()
+                                .stroke(.white.opacity(0.4), lineWidth: 1)
+                        }
+                        .shadow(color: .black.opacity(0.2), radius: 8, x: 0, y: 2)
+                }
             }
 
             Spacer()
@@ -339,16 +434,6 @@ struct VisionSimulationView: View {
     // MARK: - Bottom Area
     private var bottomArea: some View {
         VStack(spacing: 12) {
-            // Comparison slider
-            HStack(spacing: 8) {
-                Text("👁")
-                    .font(.system(size: 14))
-                ComparisonSlider(value: $sliderValue)
-                Text(selectedAnimal.emoji)
-                    .font(.system(size: 14))
-            }
-            .padding(.horizontal, 20)
-
             // Bottom control bar: [animal picker]  [capture]  [camera flip]
             ZStack {
                 HStack {
@@ -370,6 +455,7 @@ struct VisionSimulationView: View {
     // MARK: - Animal Picker Button
     private var animalPickerButton: some View {
         Button(action: {
+            dropdownFromHeader = false
             withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) {
                 showAnimalPicker.toggle()
             }
