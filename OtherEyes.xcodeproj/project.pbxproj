@@ -254,6 +254,7 @@
 				DEVELOPMENT_TEAM = 6K36QX9QYF;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_NSCameraUsageDescription = "OtherEyes uses your camera to show the world through animal eyes.";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "OtherEyes needs access to save your animal vision photos.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -289,6 +290,7 @@
 				DEVELOPMENT_TEAM = 6K36QX9QYF;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_NSCameraUsageDescription = "OtherEyes uses your camera to show the world through animal eyes.";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "OtherEyes needs access to save your animal vision photos.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
