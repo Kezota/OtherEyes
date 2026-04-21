@@ -147,13 +147,13 @@ struct VisionSimulationView: View {
         .onDisappear {
             cameraManager.stopSession()
         }
-        .onChange(of: selectedAnimal) { _, newAnimal in
+        .onChange(of: selectedAnimal) { newAnimal in
             withAnimation(.easeInOut(duration: 0.35)) {
                 cameraManager.selectedAnimal = newAnimal
             }
             handleAnimalVisit(for: newAnimal)
         }
-        .onChange(of: showInsight) { _, isShowing in
+        .onChange(of: showInsight) { isShowing in
             if !isShowing {
                 // When insight popup is dismissed, check if we have a pending immersion tip to show
                 if let pendingAnimal = pendingImmersionTipForAnimal, pendingAnimal == selectedAnimal {

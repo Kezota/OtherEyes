@@ -108,9 +108,17 @@ struct PhotoPreviewView: View {
                     // Save button
                     Button(action: saveToPhotos) {
                         HStack(spacing: 8) {
-                            Image(systemName: showSavedConfirmation ? "checkmark" : "square.and.arrow.down")
-                                .font(.system(size: 15, weight: .semibold))
-                                .contentTransition(.symbolEffect(.replace))
+                            ZStack {
+                                Image(systemName: "square.and.arrow.down")
+                                    .opacity(showSavedConfirmation ? 0 : 1)
+                                    .scaleEffect(showSavedConfirmation ? 0.8 : 1)
+
+                                Image(systemName: "checkmark")
+                                    .opacity(showSavedConfirmation ? 1 : 0)
+                                    .scaleEffect(showSavedConfirmation ? 1 : 0.8)
+                            }
+                            .font(.system(size: 15, weight: .semibold))
+                            .frame(width: 16, height: 16)
                             Text(showSavedConfirmation ? "Saved!" : "Save")
                                 .font(.system(size: 16, weight: .semibold, design: .rounded))
                         }
@@ -123,6 +131,7 @@ struct PhotoPreviewView: View {
                                 .shadow(color: .white.opacity(0.3), radius: 16, x: 0, y: 2)
                         }
                         .scaleEffect(saveScale)
+                        .animation(.easeInOut(duration: 0.2), value: showSavedConfirmation)
                     }
                     .disabled(showSavedConfirmation)
                 }
